@@ -15,9 +15,10 @@ interface GridProps {
   wordStarList?: Record<number, boolean>;
   isWList?: boolean;
   isWListStar?: boolean;
+  shadingColor?: string;
 }
 
-export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick, onDragSelection, onDragPath, cellSize = 40, appMode = 'edit', focusedCell = null, composingText = '', wordStarList = {}, isWList = false, isWListStar = false }) => {
+export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick, onDragSelection, onDragPath, cellSize = 40, appMode = 'edit', focusedCell = null, composingText = '', wordStarList = {}, isWList = false, isWListStar = false, shadingColor = '#e2e8f0' }) => {
   const [dragStart, setDragStart] = useState<{ x: number, y: number } | null>(null);
   const [dragPath, setDragPath] = useState<{ x: number, y: number }[]>([]);
 
@@ -110,7 +111,7 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick
                 // 枠線を考慮したサイズ計算
                 width: cellSize * spanW,
                 height: cellSize * spanH,
-                backgroundColor: cell.type === 'wall' ? 'var(--wall-color)' : ((cell.isShaded && (appMode === 'answer' || isWList || isWListStar)) ? '#e5e7eb' : 'white'),
+                backgroundColor: cell.type === 'wall' ? 'var(--wall-color)' : ((cell.isShaded && (appMode === 'answer' || isWList || isWListStar)) ? shadingColor : 'white'),
                 backgroundImage: (cell.isShaded && (appMode === 'answer' || isWList || isWListStar)) ? 'repeating-linear-gradient(45deg, transparent, transparent 2px, rgba(0,0,0,0.1) 2px, rgba(0,0,0,0.1) 4px)' : 'none',
                 display: 'flex',
                 alignItems: 'center',
@@ -128,8 +129,8 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick
                 zIndex: isFocused ? 10 : (cell.mergedSize ? 5 : 1)
               }}
             >
-              {/* Layer 3: 数字 (スター項目でない場合のみ表示) */}
-              {cell.number && !wordStarList[cell.number] && !wordStarList[String(cell.number) as any] && (
+              {/* Layer 3: 数字 */}
+              {cell.number && (
                 <span className="cell-number" style={{
                   position: 'absolute',
                   top: '2px',
@@ -176,7 +177,7 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick
                 <div style={{
                   position: 'absolute',
                   top: 0, left: 0, right: 0, bottom: 0,
-                  backgroundColor: (isWList || isWListStar) ? 'transparent' : '#9ca3af',
+                  backgroundColor: (isWList || isWListStar) ? 'transparent' : shadingColor,
                   backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 2px, rgba(0,0,0,0.1) 2px, rgba(0,0,0,0.1) 4px)',
                   zIndex: 4,
                   pointerEvents: 'none' // 下のマスをクリックできるようにする

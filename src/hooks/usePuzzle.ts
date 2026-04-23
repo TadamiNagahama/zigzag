@@ -24,6 +24,7 @@ const createEmptyPuzzle = (w: number, h: number): PuzzleData => {
     isWList: false,
     isWListStar: false,
     wordList2: [''],
+    shadingColor: '#e2e8f0', // デフォルトは薄いグレー (slate-200相当)
     updatedAt: Date.now()
   };
 };
@@ -327,6 +328,10 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
     });
   }, [push]);
 
+  const setShadingColor = useCallback((shadingColor: string) => {
+    push(prev => ({ ...prev, shadingColor, updatedAt: Date.now() }));
+  }, [push]);
+
   const mergeCells = useCallback((x1: number, y1: number, x2: number, y2: number) => {
     push(prev => {
       const startX = Math.min(x1, x2);
@@ -428,6 +433,7 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
     toggleShaded,
     updateCellChar,
     updateCellAnswerChar,
+    setShadingColor,
     mergeCells,
     splitCell,
     takeCheckpoint,

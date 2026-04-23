@@ -39,5 +39,13 @@ export interface PuzzleData {
   isRemainingAnswer?: boolean; // 解答余りの表示フラグ
   remainingAnswerWord?: string; // 解答余りで選択された単語
   boardTitle?: string; // 盤面表示用タイトル
+  shadingColor?: string; // 網掛けの色
   updatedAt: number;
 }
+
+export type PrintOptions = {
+  printProblem: boolean;
+  printAnswer: boolean;
+  layout: 'separate' | 'combined'; // 盤面とリストを分けるか、1ページに収めるか
+  listColumns: number; // 単語リストの段数 (2, 3, 4, 5など)
+};

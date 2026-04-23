@@ -3,18 +3,20 @@ import { Layout } from './components/Layout'
 import { Grid } from './components/Grid'
 import { AnswerArea } from './components/AnswerArea'
 import { usePuzzle } from './hooks/usePuzzle'
-import { SizeDialog } from './components/SizeDialog'
+import { SettingsDialog } from './components/SettingsDialog'
 import { SaveDialog } from './components/SaveDialog'
 import { LoadDialog } from './components/LoadDialog'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { AlertDialog } from './components/AlertDialog'
 import { ExportDialog, type ExportOptions } from './components/ExportDialog'
+import { PrintDialog } from './components/PrintDialog'
+import { PrintTemplate } from './components/PrintTemplate'
 import { exportToExcel } from './utils/excelExport'
 import { auth, dbFirestore, googleProvider } from './models/firebase'
 import { signInWithPopup, signOut, onAuthStateChanged, type User } from 'firebase/auth'
 import { collection, addDoc, getDocs, query, where, deleteDoc, doc, updateDoc } from 'firebase/firestore'
-import { type PuzzleData } from './models/types'
-import { Settings, ZoomIn, ZoomOut, Maximize, Plus } from 'lucide-react'
+import { type PuzzleData, type PrintOptions } from './models/types'
+import { Settings, ZoomIn, ZoomOut, Maximize, Plus, Printer } from 'lucide-react'
 import './App.css'
 type AppMode = 'shade' | 'edit' | 'answer';
 type EditMode = 'number' | 'wall';
@@ -39,6 +41,7 @@ function App() {
     setRemainingAnswerWord,
     updateWordList2,
     addWordList2Entry,
+    setShadingColor,
     setAnswerKey,
     toggleShaded,
     updateCellAnswerChar,
@@ -52,7 +55,9 @@ function App() {
   } = usePuzzle(17, 17);
 
   const [editMode, setEditMode] = useState<EditMode>('number');
-  const [showSizeDialog, setShowSizeDialog] = useState(false);
+  const [showSettingsDialog, setShowSettingsDialog] = useState(false);
+  const [showPrintDialog, setShowPrintDialog] = useState(false);
+  const [printOptions, setPrintOptions] = useState<PrintOptions | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, cellX: number, cellY: number } | null>(null);
   const [zoom, setZoom] = useState(1);
   const [pendingResize, setPendingResize] = useState<{ h: number, w: number } | null>(null);
@@ -348,7 +353,8 @@ function App() {
         if (!word) return;
 
         let currentCharIndex = 0;
-        updateCellAnswerChar(path[0].x, path[0].y, word[0]);
+        // 1文字目は起点（提示文字等）のため、ドラッグによる自動入力からは除外する
+        // updateCellAnswerChar(path[0].x, path[0].y, word[0]); 
 
         for (let i = 1; i < path.length; i++) {
           const prev = path[i - 1];
@@ -467,6 +473,11 @@ function App() {
 
     const emptyWordNumbers: number[] = [];
     for (const num of usedNumbers) {
+      // Wリスト★モードかつスター項目（★）としてマークされている場合は、未入力で正常なためスキップ
+      if (puzzle.isWListStar && puzzle.wordStarList?.[num]) {
+        continue;
+      }
+
       if (!puzzle.wordList[num] || puzzle.wordList[num].trim() === '') {
         emptyWordNumbers.push(num);
       }
@@ -477,7 +488,35 @@ function App() {
 
     // 3. パス接続チェック
     if (errors.length === 0) {
+      const hasPath = (w: string, x: number, y: number, visited: Set<string>): boolean => {
+        if (w === '') return true;
+        if (x < 0 || x >= puzzle.width || y < 0 || y >= puzzle.height) return false;
+        
+        const cell = puzzle.cells[y][x];
+        const currentChar = cell.char || cell.answerChar;
+        if (cell.type !== 'normal' || currentChar !== w[0]) return false;
+        
+        const key = `${x},${y}`;
+        if (visited.has(key)) return false;
+        
+        const newVisited = new Set(visited);
+        newVisited.add(key);
+        const nextW = w.slice(1);
+        if (nextW === '') return true;
+
+        const neighbors = [[0,1], [0,-1], [1,0], [-1,0]];
+        for (const [dx, dy] of neighbors) {
+          if (hasPath(nextW, x + dx, y + dy, newVisited)) return true;
+        }
+        return false;
+      };
+
       for (const num of usedNumbers) {
+        // Wリスト★モードかつスター項目（★）の場合は、単語リストが空（未入力）のため経路チェックもスキップ
+        if (puzzle.isWListStar && puzzle.wordStarList?.[num]) {
+          continue;
+        }
+
         const word = puzzle.wordList[num];
         let startPos: {x: number, y: number} | null = null;
         for (let y = 0; y < puzzle.height; y++) {
@@ -494,29 +533,6 @@ function App() {
           errors.push(`番号 ${num} が盤面に見つかりません`);
           continue;
         }
-
-        const hasPath = (w: string, x: number, y: number, visited: Set<string>): boolean => {
-          if (w === '') return true;
-          if (x < 0 || x >= puzzle.width || y < 0 || y >= puzzle.height) return false;
-          
-          const cell = puzzle.cells[y][x];
-          const currentChar = cell.char || cell.answerChar;
-          if (cell.type !== 'normal' || currentChar !== w[0]) return false;
-          
-          const key = `${x},${y}`;
-          if (visited.has(key)) return false;
-          
-          const newVisited = new Set(visited);
-          newVisited.add(key);
-          const nextW = w.slice(1);
-          if (nextW === '') return true;
-
-          const neighbors = [[0,1], [0,-1], [1,0], [-1,0]];
-          for (const [dx, dy] of neighbors) {
-            if (hasPath(nextW, x + dx, y + dy, newVisited)) return true;
-          }
-          return false;
-        };
 
         if (!hasPath(word, startPos.x, startPos.y, new Set())) {
           errors.push(`番号 ${num} (「${word}」) の経路が正しく繋がっていません`);
@@ -703,7 +719,15 @@ function App() {
     } else if (e.key === 'Enter') {
       e.preventDefault();
       handleAdvanceFocus();
-    } else if (e.key === 'Backspace' || e.key === 'Delete') {
+    } else if (e.key === 'Backspace') {
+      const cell = puzzle.cells[focusedCell.y][focusedCell.x];
+      const current = cell.answerChar || '';
+      if (current.length > 1) {
+        updateCellAnswerChar(focusedCell.x, focusedCell.y, current.slice(0, -1));
+      } else {
+        updateCellAnswerChar(focusedCell.x, focusedCell.y, '');
+      }
+    } else if (e.key === 'Delete') {
       updateCellAnswerChar(focusedCell.x, focusedCell.y, '');
     }
   };
@@ -743,7 +767,7 @@ function App() {
     } else {
       resizeBoard(newH, newW);
       fitToScreen(newH, newW);
-      setShowSizeDialog(false);
+      setShowSettingsDialog(false);
     }
   };
 
@@ -752,8 +776,16 @@ function App() {
       resizeBoard(pendingResize.h, pendingResize.w);
       fitToScreen(pendingResize.h, pendingResize.w);
       setPendingResize(null);
-      setShowSizeDialog(false);
+      setShowSettingsDialog(false);
     }
+  };
+
+  const handlePrintRequest = (options: PrintOptions) => {
+    setPrintOptions(options);
+    // レンダリングを待つ
+    setTimeout(() => {
+      window.print();
+    }, 100);
   };
 
   useEffect(() => {
@@ -858,8 +890,9 @@ function App() {
         style={{ position: 'fixed', opacity: 0, pointerEvents: 'none', top: 0, left: 0 }}
       />
       <aside className="sidebar shadow">
-        <div className="sidebar-content">
-          <section>
+        <div className="sidebar-content" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', padding: 0 }}>
+          {/* 固定ヘッダー部分 */}
+          <section style={{ padding: '16px 16px 8px 16px', flexShrink: 0 }}>
             <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
               <button 
                 className={appMode === 'shade' ? 'btn-primary' : 'btn-secondary'}
@@ -890,34 +923,38 @@ function App() {
               </button>
             </div>
             
-            {appMode === 'shade' && (
-              <div style={{ marginBottom: '16px' }}>
-                {/* 網掛けモードの表示はなし */}
-              </div>
-            )}
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '16px' }}>
+              <button 
+                className="btn-secondary" 
+                style={{ padding: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                onClick={() => setShowSettingsDialog(true)}
+                title="設定"
+              >
+                <Settings size={20} />
+              </button>
 
-            {appMode === 'edit' && (
-              <div style={{ marginBottom: '16px' }}>
-                {/* 問題面モードの表示はなし */}
-              </div>
-            )}
+              <button 
+                className="btn-secondary" 
+                style={{ padding: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                onClick={() => setShowPrintDialog(true)}
+                title="印刷"
+              >
+                <Printer size={20} />
+              </button>
+              
+              {appMode === 'answer' ? (
+                <>
+                  <button className="btn-secondary" style={{ flex: 1, fontSize: '0.85rem', padding: '10px' }}>自動解答</button>
+                  <button className="btn-secondary" style={{ flex: 1, fontSize: '0.85rem', padding: '10px' }} onClick={validateManuscript}>完成チェック</button>
+                </>
+              ) : (
+                <div style={{ flex: 1, height: '42px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)', fontSize: '0.85rem', paddingLeft: '8px' }}>
+                  {appMode === 'shade' ? '網掛けマスを選択してください' : '番号の起点を選択してください'}
+                </div>
+              )}
+            </div>
 
-            {appMode === 'answer' && (
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
-                <button className="btn-secondary" style={{ flex: 1, fontSize: '0.85rem', padding: '10px' }}>自動解答</button>
-                <button className="btn-secondary" style={{ flex: 1, fontSize: '0.85rem', padding: '10px' }} onClick={validateManuscript}>完成チェック</button>
-              </div>
-            )}
-          </section>
-
-          <hr style={{ border: 'none', borderTop: '1px solid var(--border-color)', margin: '0.25rem 0' }} />
-          
-          <section style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <div style={{ 
-              fontSize: '0.8rem', 
-              borderTop: '1px solid var(--border-color)', 
-              paddingTop: '12px' 
-            }}>
+            <div style={{ padding: '0 0 4px 0' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
                 <h4 style={{ margin: 0, fontSize: '0.9rem', color: 'var(--primary-color)' }}>単語リスト</h4>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -955,15 +992,21 @@ function App() {
                   backgroundColor: '#fff5f5', 
                   padding: '4px 8px', 
                   borderRadius: '4px', 
-                  marginBottom: '8px',
-                  border: '1px solid #fed7d7'
+                  border: '1px solid #fed7d7',
+                  marginTop: '4px'
                 }}>
-                  ⚠️ WリストとWリスト★を同時に選択することはできません
+                  ⚠️ WリストとWリスト★を同時に選択不可
                 </div>
               )}
-              
+            </div>
+          </section>
 
-              <div className="word-list-grid" style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
+          <hr style={{ border: 'none', borderTop: '2px solid var(--border-color)', margin: '0', flexShrink: 0 }} />
+          
+          {/* スクロール可能な中央部分 */}
+          <section style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', padding: '12px 16px' }}>
+            <div style={{ fontSize: '0.8rem' }}>
+              <div className="word-list-grid" style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
                 {numbers.map(num => (
                   <div key={num} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <span style={{ minWidth: '24px', fontWeight: 'bold', fontSize: '0.9rem' }}>{num}.</span>
@@ -992,22 +1035,54 @@ function App() {
                     <input 
                       type="text" 
                       value={puzzle.wordList[num] || ''} 
-                      disabled={puzzle.wordStarList?.[num] || false}
                       onChange={(e) => {
                         const isFirst = editingWordRef.current !== num;
                         updateWordList(num, e.target.value, isFirst);
                         editingWordRef.current = num;
                       }}
-                      onBlur={() => {
+                      onBlur={(e) => {
+                        const val = e.target.value.trim();
+                        if (puzzle.isWListStar && puzzle.wordStarList?.[num] && val !== '') {
+                          setConfirmAction({
+                            message: "★のマスですが、入力していいですか?",
+                            isDestructive: false,
+                            onConfirm: () => setConfirmAction(null),
+                            onCancel: () => {
+                              updateWordList(num, '', false);
+                              setConfirmAction(null);
+                            }
+                          } as any);
+                        }
                         editingWordRef.current = null;
                       }}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           e.preventDefault();
-                          const inputs = Array.from(document.querySelectorAll('.word-list-grid .input-field')) as HTMLInputElement[];
-                          const index = inputs.indexOf(e.currentTarget as HTMLInputElement);
-                          if (index !== -1 && index < inputs.length - 1) {
-                            inputs[index + 1].focus();
+                          const val = (e.currentTarget as HTMLInputElement).value.trim();
+                          
+                          const moveFocus = () => {
+                            const inputs = Array.from(document.querySelectorAll('.word-list-grid .input-field')) as HTMLInputElement[];
+                            const index = inputs.indexOf(e.currentTarget as HTMLInputElement);
+                            if (index !== -1 && index < inputs.length - 1) {
+                              inputs[index + 1].focus();
+                            }
+                          };
+
+                          if (puzzle.isWListStar && puzzle.wordStarList?.[num] && val !== '') {
+                            setConfirmAction({
+                              message: "★のマスですが、入力していいですか?",
+                              isDestructive: false,
+                              onConfirm: () => {
+                                setConfirmAction(null);
+                                moveFocus();
+                              },
+                              onCancel: () => {
+                                updateWordList(num, '', false);
+                                setConfirmAction(null);
+                              }
+                            } as any);
+                          } else {
+                            moveFocus();
                           }
                         }
                       }}
@@ -1024,69 +1099,70 @@ function App() {
                 )}
               </div>
 
-                <div style={{ marginTop: '20px', borderTop: '2px solid var(--border-color)', paddingTop: '12px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-                    <h4 style={{ margin: 0, fontSize: '0.9rem', color: 'var(--primary-color)' }}>リスト2</h4>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', cursor: 'pointer', color: 'var(--text-muted)' }}>
-                      <input 
-                        type="checkbox"
-                        checked={puzzle.isRemainingAnswer || false}
-                        onChange={(e) => setIsRemainingAnswer(e.target.checked)}
-                      />
-                      解答余り
-                    </label>
-                  </div>
-                  <div className="word-list2-container" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {(puzzle.wordList2 || ['']).map((word, idx) => (
-                      <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{ minWidth: '24px' }}></span> {/* 幅合わせ用の空スペース */}
+                {(puzzle.isWList || puzzle.isWListStar) && (
+                  <div style={{ marginTop: '20px', borderTop: '2px solid var(--border-color)', paddingTop: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                      <h4 style={{ margin: 0, fontSize: '0.9rem', color: 'var(--primary-color)' }}>リスト2</h4>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', cursor: 'pointer', color: 'var(--text-muted)' }}>
                         <input 
-                          type="text"
-                          value={word}
-                          onChange={(e) => updateWordList2(idx, e.target.value)}
-                          className="input-field"
-                          style={{ padding: '6px 10px', fontSize: '0.9rem', flex: 1 }}
-                          placeholder={`${idx + 1}. 単語を入力...`}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              const inputs = Array.from(document.querySelectorAll('.word-list2-container .input-field')) as HTMLInputElement[];
-                              const index = inputs.indexOf(e.currentTarget as HTMLInputElement);
-                              if (index !== -1 && index < inputs.length - 1) {
-                                inputs[index + 1].focus();
-                              }
-                            }
-                          }}
+                          type="checkbox"
+                          checked={puzzle.isRemainingAnswer || false}
+                          onChange={(e) => setIsRemainingAnswer(e.target.checked)}
                         />
-                      </div>
-                    ))}
-                    <button 
-                      onClick={addWordList2Entry}
-                      style={{ 
-                        border: '1px dashed var(--border-color)', 
-                        background: 'none', 
-                        padding: '8px', 
-                        borderRadius: '4px', 
-                        cursor: 'pointer',
-                        color: 'var(--text-muted)'
-                      }}
-                      title="入力欄を追加"
-                    >
-                      <Plus size={16} />
-                    </button>
+                        解答余り
+                      </label>
+                    </div>
+                    <div className="word-list2-container" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {(puzzle.wordList2 || ['']).map((word, idx) => (
+                        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ minWidth: '24px' }}></span> {/* 幅合わせ用の空スペース */}
+                          <input 
+                            type="text"
+                            value={word}
+                            onChange={(e) => updateWordList2(idx, e.target.value)}
+                            className="input-field"
+                            style={{ padding: '6px 10px', fontSize: '0.9rem', flex: 1 }}
+                            placeholder={`${idx + 1}. 単語を入力...`}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                const inputs = Array.from(document.querySelectorAll('.word-list2-container .input-field')) as HTMLInputElement[];
+                                const index = inputs.indexOf(e.currentTarget as HTMLInputElement);
+                                if (index !== -1 && index < inputs.length - 1) {
+                                  inputs[index + 1].focus();
+                                }
+                              }
+                            }}
+                          />
+                        </div>
+                      ))}
+                      <button 
+                        onClick={addWordList2Entry}
+                        style={{ 
+                          border: '1px dashed var(--border-color)', 
+                          background: 'none', 
+                          padding: '8px', 
+                          borderRadius: '4px', 
+                          cursor: 'pointer',
+                          color: 'var(--text-muted)'
+                        }}
+                        title="入力欄を追加"
+                      >
+                        <Plus size={16} />
+                      </button>
+                    </div>
                   </div>
-                </div>
+                )}
             </div>
           </section>
 
-          <hr style={{ border: 'none', borderTop: '1px solid var(--border-color)', margin: '0.5rem 0' }} />
-          
-          <section style={{ paddingBottom: '1rem' }}>
-            <div style={{ marginBottom: '16px' }}>
+          {/* 固定フッター部分 */}
+          <section style={{ padding: '8px 16px 16px 16px', borderTop: '1px solid var(--border-color)', flexShrink: 0 }}>
+            <div>
               <label style={{ fontSize: '0.8rem', fontWeight: 'bold', marginBottom: '8px', display: 'block' }}>
                 表示倍率: {Math.round(zoom * 100)}%
               </label>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
                 <button className="btn-secondary" style={{ padding: '6px' }} onClick={() => setZoom(z => Math.max(0.5, z - 0.1))} title="縮小">
                   <ZoomOut size={16} />
                 </button>
@@ -1107,22 +1183,11 @@ function App() {
 
             <button 
               className="btn-secondary" 
-              style={{ width: '100%', marginBottom: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontWeight: 'bold' }}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontWeight: 'bold' }}
               onClick={() => fitToScreen(puzzle.height, puzzle.width)}
             >
               <Maximize size={18} /> 画面フィット
             </button>
-
-            <button 
-              className="btn-secondary" 
-              style={{ width: '100%', marginBottom: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
-              onClick={() => setShowSizeDialog(true)}
-            >
-              <Settings size={18} /> 盤面サイズの変更
-            </button>
-            <div style={{ textAlign: 'center', marginTop: '12px', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-              v0.0.1
-            </div>
           </section>
         </div>
       </aside>
@@ -1185,6 +1250,7 @@ function App() {
               wordStarList={puzzle.wordStarList}
               isWList={puzzle.isWList}
               isWListStar={puzzle.isWListStar}
+              shadingColor={puzzle.shadingColor}
             />
           </div>
         </div>
@@ -1239,12 +1305,31 @@ function App() {
         );
       })()}
 
-      {showSizeDialog && (
-        <SizeDialog 
+      {showSettingsDialog && (
+        <SettingsDialog 
           currentWidth={puzzle.width} 
           currentHeight={puzzle.height} 
-          onClose={() => setShowSizeDialog(false)}
-          onApply={handleResizeRequest}
+          shadingColor={puzzle.shadingColor || '#e2e8f0'}
+          onClose={() => setShowSettingsDialog(false)}
+          onApplySize={handleResizeRequest}
+          onSetShadingColor={setShadingColor}
+          version="0.0.1"
+        />
+      )}
+
+      {showPrintDialog && (
+        <PrintDialog 
+          onClose={() => setShowPrintDialog(false)}
+          onPrint={handlePrintRequest}
+        />
+      )}
+
+      {printOptions && (
+        <PrintTemplate 
+          puzzle={puzzle}
+          options={printOptions}
+          alphabetGroups={alphabetGroups}
+          answerChars={answerChars}
         />
       )}
 
@@ -1315,7 +1400,7 @@ function App() {
         <ConfirmDialog 
           message={confirmAction.message}
           onConfirm={confirmAction.onConfirm}
-          onCancel={() => setConfirmAction(null)}
+          onCancel={(confirmAction as any).onCancel || (() => setConfirmAction(null))}
           isDestructive={(confirmAction as any).isDestructive}
         />
       )}
