@@ -40,10 +40,10 @@ export function useUndoRedo<T>(initialState: T) {
   // 新しい状態を保存するための汎用的な関数
   const push = useCallback((action: T | ((prev: T) => T)) => {
     setHistory(prev => {
-      const newPresent = typeof action === 'function' 
-        ? (action as (p: T) => T)(prev.present) 
+      const newPresent = typeof action === 'function'
+        ? (action as (p: T) => T)(prev.present)
         : action;
-      
+
       if (JSON.stringify(newPresent) === JSON.stringify(prev.present)) return prev;
 
       return {

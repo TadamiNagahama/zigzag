@@ -5,12 +5,13 @@ import { type PuzzleData } from '../models/types';
 
 interface SaveDialogProps {
   currentTitle: string;
+  tags: string[];
   existingPuzzles: PuzzleData[];
   onClose: () => void;
-  onSave: (title: string, overwriteId?: string) => Promise<void>;
+  onSave: (title: string, tags: string[], overwriteId?: string) => Promise<void>;
 }
 
-export const SaveDialog: React.FC<SaveDialogProps> = ({ currentTitle, existingPuzzles, onClose, onSave }) => {
+export const SaveDialog: React.FC<SaveDialogProps> = ({ currentTitle, tags, existingPuzzles, onClose, onSave }) => {
   const [title, setTitle] = useState(currentTitle);
   const [isSaving, setIsSaving] = useState(false);
   const [alertMsg, setAlertMsg] = useState<string | null>(null);
@@ -25,14 +26,14 @@ export const SaveDialog: React.FC<SaveDialogProps> = ({ currentTitle, existingPu
     if (existing) {
       setConfirmOverwriteId(existing.firebaseId!);
     } else {
-      executeSave(title.trim(), undefined);
+      executeSave(title.trim(), tags, undefined);
     }
   };
 
-  const executeSave = async (sTitle: string, overwriteId?: string) => {
+  const executeSave = async (sTitle: string, sTags: string[], overwriteId?: string) => {
     setIsSaving(true);
     try {
-      await onSave(sTitle, overwriteId);
+      await onSave(sTitle, sTags, overwriteId);
       onClose();
     } catch (e) {
       console.error(e);
@@ -45,7 +46,8 @@ export const SaveDialog: React.FC<SaveDialogProps> = ({ currentTitle, existingPu
     <div className="modal-overlay" style={{ zIndex: 3000 }}>
       <div className="modal-content glass card" style={{ width: '400px', padding: '24px' }}>
         <h3 style={{ marginBottom: '16px' }}>クラウドに保存</h3>
-        <div style={{ marginBottom: '20px' }}>
+        
+        <div style={{ marginBottom: '16px' }}>
           <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem' }}>パズルのタイトル</label>
           <input 
             type="text" 
@@ -56,6 +58,20 @@ export const SaveDialog: React.FC<SaveDialogProps> = ({ currentTitle, existingPu
             disabled={isSaving}
           />
         </div>
+
+        {tags.length > 0 && (
+          <div style={{ marginBottom: '20px' }}>
+            <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>設定されているタグ</label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+              {tags.map(tag => (
+                <span key={tag} style={{ fontSize: '0.75rem', backgroundColor: '#edf2f7', padding: '2px 8px', borderRadius: '4px', color: '#4a5568' }}>
+                  {tag}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
           <button className="btn-secondary" onClick={onClose} disabled={isSaving}>キャンセル</button>
           <button className="btn-primary" onClick={handleSaveClick} disabled={isSaving}>
@@ -74,7 +90,7 @@ export const SaveDialog: React.FC<SaveDialogProps> = ({ currentTitle, existingPu
           confirmText="上書きする"
           isDestructive={true}
           onConfirm={() => {
-            executeSave(title.trim(), confirmOverwriteId);
+            executeSave(title.trim(), tags, confirmOverwriteId);
             setConfirmOverwriteId(null);
           }}
           onCancel={() => setConfirmOverwriteId(null)}

@@ -16,6 +16,7 @@ export interface ExportOptions {
   cellWidth: number;
   cellHeight1: number;
   cellHeight2: number;
+  fontName: string;
   fontSizeSmall: number;
   fontSizeLarge: number;
   listFontSize: number;
@@ -42,6 +43,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ initialOptions, hasS
     cellWidth: 48,
     cellHeight1: 48,
     cellHeight2: 33,
+    fontName: 'MS Pゴシック',
     fontSizeSmall: 10,
     fontSizeLarge: 14,
     listFontSize: 11,
@@ -50,6 +52,89 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ initialOptions, hasS
     ...initialOptions
   });
   const [isExporting, setIsExporting] = useState(false);
+  const [localFonts, setLocalFonts] = useState<string[]>([]);
+  const [availablePresets, setAvailablePresets] = useState<string[]>([]);
+  const [isLoadingFonts, setIsLoadingFonts] = useState(false);
+
+  // フォントが利用可能かチェックする関数
+  const isFontAvailable = (fontName: string) => {
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    if (!context) return false;
+    
+    // 幅の差が出やすい文字列（英数字 + 日本語）
+    const text = 'mmmmmmmiiiiii111111漢字';
+    const fontSize = 72;
+    
+    const checkWithFallback = (fallback: string) => {
+      // 指定フォント + 候補
+      context.font = `${fontSize}px "${fontName}", ${fallback}`;
+      const widthWithFont = context.measureText(text).width;
+      
+      // 候補のみ
+      context.font = `${fontSize}px ${fallback}`;
+      const widthWithFallback = context.measureText(text).width;
+      
+      // 幅が異なれば、指定フォントが適用されている（存在している）と判断
+      return widthWithFont !== widthWithFallback;
+    };
+
+    // セリフ、サンセリフ、等幅のいずれかと比較して差があれば存在するとみなす
+    // (MSゴシックのような等幅フォントはmonospaceと同じ幅になる可能性があるため、serifとも比較する)
+    return checkWithFallback('serif') || checkWithFallback('sans-serif') || checkWithFallback('monospace');
+  };
+
+  // 初期化時にプリセットをチェック
+  React.useEffect(() => {
+    const fontGroups = [
+      { id: 'MS Pゴシック', names: ['MS Pゴシック', 'ＭＳ Ｐゴシック', 'MS PGothic'] },
+      { id: 'MS ゴシック', names: ['MS ゴシック', 'ＭＳ ゴシック', 'MS Gothic'] },
+      { id: 'MS P明朝', names: ['MS P明朝', 'ＭＳ Ｐ明朝', 'MS PMincho'] },
+      { id: 'MS 明朝', names: ['MS 明朝', 'ＭＳ 明朝', 'MS Mincho'] },
+      { id: '游ゴシック', names: ['游ゴシック', 'Yu Gothic'] },
+      { id: '游明朝', names: ['游明朝', 'Yu Mincho'] },
+      { id: 'メイリオ', names: ['メイリオ', 'Meiryo'] },
+      { id: 'HG丸ｺﾞｼｯｸM-PRO', names: ['HG丸ｺﾞｼｯｸM-PRO', 'HGMaruGothicMPRO'] },
+      { id: 'ヒラギノ角ゴ ProN', names: ['ヒラギノ角ゴ ProN', 'Hiragino Kaku Gothic ProN'] },
+      { id: 'ヒラギノ明朝 ProN', names: ['ヒラギノ明朝 ProN', 'Hiragino Mincho ProN'] }
+    ];
+
+    const available: string[] = [];
+    for (const group of fontGroups) {
+      // グループ内のいずれかの名前で検知できればOK
+      const isAvailable = group.names.some(name => isFontAvailable(name));
+      if (isAvailable) {
+        available.push(group.id);
+      }
+    }
+
+    setAvailablePresets(available);
+    
+    // 初期値が利用不可な場合のフォールバック
+    if (available.length > 0 && !available.includes(options.fontName)) {
+      setOptions(prev => ({ ...prev, fontName: available[0] }));
+    }
+  }, []);
+
+  const handleGetFonts = async () => {
+    if ('queryLocalFonts' in window) {
+      setIsLoadingFonts(true);
+      try {
+        const fonts = await (window as any).queryLocalFonts();
+        // 重複を除去して名前のリストを作成
+        const names = Array.from(new Set(fonts.map((f: any) => f.fullName || f.family))) as string[];
+        names.sort();
+        setLocalFonts(names);
+      } catch (e) {
+        console.error('Font access denied or error:', e);
+        alert('フォントへのアクセスが拒否されたか、エラーが発生しました。');
+      } finally {
+        setIsLoadingFonts(false);
+      }
+    } else {
+      alert('お使いのブラウザはフォント一覧の取得に対応していません。最新のChromeまたはEdgeをご使用ください。');
+    }
+  };
 
   const handleExport = async () => {
     setIsExporting(true);
@@ -68,29 +153,29 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ initialOptions, hasS
     <div className="modal-overlay" style={{ zIndex: 3000 }}>
       <div className="modal-content glass card" style={{ width: '500px', padding: '24px', maxHeight: '90vh', overflowY: 'auto' }}>
         <h3 style={{ marginBottom: '20px', borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }}>Excel出力設定</h3>
-        
+
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           {/* 出力タイプの設定（超モード対応） */}
           <section>
-            <h4 style={{ fontSize: '0.9rem', color: 'var(--primary-color)', marginBottom: '10px' }}>【出力モード】</h4>
+            <h4 style={{ fontSize: '0.9rem', color: 'var(--primary-color)', marginBottom: '10px' }}>【網掛け】</h4>
             <div style={{ display: 'flex', gap: '20px', paddingLeft: '10px' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                <input 
-                  type="radio" 
-                  name="exportMode" 
-                  checked={options.exportMode === 'normal'} 
+                <input
+                  type="radio"
+                  name="exportMode"
+                  checked={options.exportMode === 'normal'}
                   onChange={() => setOptions({ ...options, exportMode: 'normal' })}
                 />
-                通常
+                なし
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                <input 
-                  type="radio" 
-                  name="exportMode" 
-                  checked={options.exportMode === 'super'} 
+                <input
+                  type="radio"
+                  name="exportMode"
+                  checked={options.exportMode === 'super'}
                   onChange={() => setOptions({ ...options, exportMode: 'super' })}
                 />
-                「超」問題・Wリスト
+                あり
               </label>
             </div>
           </section>
@@ -98,108 +183,167 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ initialOptions, hasS
           {/* 盤面の設定 */}
           <section>
             <h4 style={{ fontSize: '0.9rem', color: 'var(--primary-color)', marginBottom: '10px' }}>【1マスのセル数とサイズ】</h4>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingLeft: '10px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                <input 
-                  type="radio" 
-                  name="boardMode" 
-                  checked={options.boardCellMode === '1x1'} 
-                  onChange={() => setOptions({ ...options, boardCellMode: '1x1' })}
-                />
-                1マス ＝ 1セル
-              </label>
-              {options.boardCellMode === '1x1' && (
-                <div style={{ marginLeft: '24px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', cursor: 'pointer' }}>
-                    <input 
-                      type="checkbox" 
-                      checked={options.boardNewline} 
-                      onChange={(e) => setOptions({ ...options, boardNewline: e.target.checked })}
-                    />
-                    数字と文字の間に改行を入れる
-                  </label>
-                  <div style={{ display: 'flex', gap: '12px', fontSize: '0.85rem', alignItems: 'center' }}>
-                    幅: <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <input type="number" className="input-field" style={{ width: '50px', padding: '2px' }} value={options.cellWidth} onChange={e => setOptions({...options, cellWidth: parseInt(e.target.value)||0})} />
-                          <span>px</span>
-                        </div>
-                    高さ: <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            <input type="number" className="input-field" style={{ width: '50px', padding: '2px' }} value={options.cellHeight1} onChange={e => setOptions({...options, cellHeight1: parseInt(e.target.value)||0})} />
-                            <span>px</span>
-                          </div>
-                  </div>
-                </div>
-              )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', paddingLeft: '10px' }}>
+              {/* モード選択 */}
+              <div style={{ display: 'flex', gap: '15px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '0.85rem' }}>
+                  <input type="radio" name="boardMode" checked={options.boardCellMode === '1x1'} onChange={() => setOptions({ ...options, boardCellMode: '1x1', cellWidth: 48, cellHeight1: 48 })} />
+                  1マス＝1セル
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '0.85rem' }}>
+                  <input type="radio" name="boardMode" checked={options.boardCellMode === '2x1'} onChange={() => setOptions({ ...options, boardCellMode: '2x1', cellWidth: 48, cellHeight1: 15, cellHeight2: 33 })} />
+                  1マス＝2セル
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '0.85rem' }}>
+                  <input type="radio" name="boardMode" checked={options.boardCellMode === '3x3'} onChange={() => setOptions({ ...options, boardCellMode: '3x3', cellWidth: 16, cellHeight1: 16 })} />
+                  1マス＝3×3
+                </label>
+              </div>
 
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                <input 
-                  type="radio" 
-                  name="boardMode" 
-                  checked={options.boardCellMode === '2x1'} 
-                  onChange={() => setOptions({ ...options, boardCellMode: '2x1', cellHeight1: 15, cellHeight2: 33 })}
-                />
-                1マス ＝ 2セル (縦に並べる)
-              </label>
-              {options.boardCellMode === '2x1' && (
-                <div style={{ marginLeft: '24px', fontSize: '0.85rem', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                    幅:<div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                         <input type="number" className="input-field" style={{ width: '50px', padding: '2px' }} value={options.cellWidth} onChange={e => setOptions({...options, cellWidth: parseInt(e.target.value)||0})} />
-                         <span>px</span>
-                       </div>
-                    上の高さ:<div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                               <input type="number" className="input-field" style={{ width: '50px', padding: '2px' }} value={options.cellHeight1} onChange={e => setOptions({...options, cellHeight1: parseInt(e.target.value)||0})} />
-                               <span>px</span>
-                             </div>
-                    下の高さ:<div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                               <input type="number" className="input-field" style={{ width: '50px', padding: '2px' }} value={options.cellHeight2} onChange={e => setOptions({...options, cellHeight2: parseInt(e.target.value)||0})} />
-                               <span>px</span>
-                             </div>
+              {/* サイズプリセット (横並び) */}
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>標準設定:</span>
+                {options.boardCellMode === '3x3' ? (
+                  <>
+                    <button className="btn-secondary" style={{ fontSize: '0.75rem', padding: '4px 10px' }} onClick={() => setOptions({ ...options, cellWidth: 16, cellHeight1: 16 })}>標準 (16px)</button>
+                    <button className="btn-secondary" style={{ fontSize: '0.75rem', padding: '4px 10px' }} onClick={() => setOptions({ ...options, cellWidth: 18, cellHeight1: 18 })}>少し大 (18px)</button>
+                    <button className="btn-secondary" style={{ fontSize: '0.75rem', padding: '4px 10px' }} onClick={() => setOptions({ ...options, cellWidth: 21, cellHeight1: 21 })}>大きめ (21px)</button>
+                  </>
+                ) : (
+                  <>
+                    <button className="btn-secondary" style={{ fontSize: '0.75rem', padding: '4px 10px' }} onClick={() => setOptions({ ...options, cellWidth: 48, cellHeight1: (options.boardCellMode === '1x1' ? 48 : 15), cellHeight2: (options.boardCellMode === '2x1' ? 33 : options.cellHeight2) })}>標準 (48px)</button>
+                    <button className="btn-secondary" style={{ fontSize: '0.75rem', padding: '4px 10px' }} onClick={() => setOptions({ ...options, cellWidth: 60, cellHeight1: (options.boardCellMode === '1x1' ? 60 : 18), cellHeight2: (options.boardCellMode === '2x1' ? 42 : options.cellHeight2) })}>大きめ (60px)</button>
+                  </>
+                )}
+              </div>
+
+              {/* サイズ指定 & プレビュー */}
+              <div style={{ background: 'var(--bg-secondary)', padding: '15px', borderRadius: '12px', marginTop: '5px' }}>
+                <div style={{ display: 'flex', gap: '40px', alignItems: 'center', justifyContent: 'center' }}>
+                  {/* 数値入力エリア */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 'bold', width: '80px', textAlign: 'right' }}>幅:</span>
+                      <input type="number" step="1" className="input-field" style={{ width: '55px', textAlign: 'center' }} value={options.cellWidth} onChange={e => setOptions({ ...options, cellWidth: parseFloat(e.target.value) || 0 })} />
+                      <span style={{ fontSize: '0.85rem', width: '20px' }}>px</span>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--primary-color)', minWidth: '80px' }}>Excel: {((options.cellWidth - 5) / 8).toFixed(2)}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 'bold', width: '80px', textAlign: 'right' }}>{options.boardCellMode === '2x1' ? '高さ(上):' : '高さ:'}</span>
+                      <input type="number" step="1" className="input-field" style={{ width: '55px', textAlign: 'center' }} value={options.cellHeight1} onChange={e => setOptions({ ...options, cellHeight1: parseFloat(e.target.value) || 0 })} />
+                      <span style={{ fontSize: '0.85rem', width: '20px' }}>px</span>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--primary-color)', minWidth: '80px' }}>Excel: {(options.cellHeight1 * 0.75).toFixed(1)}pt</span>
+                    </div>
+                    {options.boardCellMode === '2x1' && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <span style={{ fontSize: '0.85rem', fontWeight: 'bold', width: '80px', textAlign: 'right' }}>高さ(下):</span>
+                        <input type="number" step="1" className="input-field" style={{ width: '55px', textAlign: 'center' }} value={options.cellHeight2} onChange={e => setOptions({ ...options, cellHeight2: parseFloat(e.target.value) || 0 })} />
+                        <span style={{ fontSize: '0.85rem', width: '20px' }}>px</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--primary-color)', minWidth: '80px' }}>Excel: {(options.cellHeight2 * 0.75).toFixed(1)}pt</span>
+                      </div>
+                    )}
                   </div>
-                  <div>
-                    <span>アルファベットの配置:</span>
-                    <div style={{ display: 'flex', gap: '12px', marginTop: '4px' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-                      <input 
-                        type="radio" 
-                        name="alphaPos" 
-                        checked={options.alphabetPos === 'top'} 
-                        onChange={() => setOptions({ ...options, alphabetPos: 'top' })}
-                      /> 上のセル
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-                      <input 
-                        type="radio" 
-                        name="alphaPos" 
-                        checked={options.alphabetPos === 'bottom'} 
-                        onChange={() => setOptions({ ...options, alphabetPos: 'bottom' })}
-                      /> 下のセル
-                    </label>
+
+                  {/* プレビュー表示エリア */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '5px' }}>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>プレビュー</div>
+                    <div style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      padding: '10px',
+                      border: '1px dashed var(--border-color)',
+                      background: 'white',
+                      minWidth: '100px',
+                      minHeight: '100px',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}>
+                      {options.boardCellMode === '3x3' ? (
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(3, 1fr)',
+                          gap: '0',
+                          border: '2px solid var(--primary-color)',
+                          background: 'white',
+                          boxSizing: 'content-box'
+                        }}>
+                          {[...Array(9)].map((_, i) => (
+                            <div key={i} style={{
+                              width: `${Math.min(20, options.cellWidth)}px`,
+                              height: `${Math.min(20, options.cellHeight1)}px`,
+                              border: '0.2px solid var(--primary-color)',
+                              boxSizing: 'border-box',
+                              background: 'var(--primary-light)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '0.6rem',
+                              fontWeight: 'bold',
+                              color: 'var(--primary-color)'
+                            }}>
+                              {i === 0 ? '1' : (i === 4 ? '字' : '')}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div style={{ border: '2px solid var(--primary-color)' }}>
+                          <div style={{
+                            width: `${Math.min(60, options.cellWidth)}px`,
+                            height: `${Math.min(60, options.cellHeight1)}px`,
+                            background: 'var(--primary-light)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '0.75rem',
+                            fontWeight: 'bold',
+                            color: 'var(--primary-color)',
+                            lineHeight: '1.1',
+                            textAlign: 'center',
+                            whiteSpace: 'pre-wrap'
+                          }}>
+                            {options.boardCellMode === '2x1' ? '1' : (options.boardNewline ? '1\n字' : '1字')}
+                          </div>
+                          {options.boardCellMode === '2x1' && (
+                            <div style={{
+                              width: `${Math.min(60, options.cellWidth)}px`,
+                              height: `${Math.min(60, options.cellHeight2)}px`,
+                              borderTop: '1px solid var(--primary-color)',
+                              background: 'var(--primary-light)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '0.75rem',
+                              fontWeight: 'bold',
+                              color: 'var(--primary-color)'
+                            }}>
+                              字
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
+              </div>
+
+              {options.boardCellMode === '1x1' && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={options.boardNewline} onChange={(e) => setOptions({ ...options, boardNewline: e.target.checked })} />
+                  数字と文字の間に改行を入れる
+                </label>
               )}
 
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                <input 
-                  type="radio" 
-                  name="boardMode" 
-                  checked={options.boardCellMode === '3x3'} 
-                  onChange={() => setOptions({ ...options, boardCellMode: '3x3', cellWidth: 16, cellHeight1: 16 })}
-                />
-                1マス ＝ 3×3セル (左上:数字、中央:文字、右下:アルファベット)
-              </label>
-              {options.boardCellMode === '3x3' && (
-                <div style={{ marginLeft: '24px', display: 'flex', gap: '12px', fontSize: '0.85rem', alignItems: 'center' }}>
-                  幅:<div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                       <input type="number" className="input-field" style={{ width: '50px', padding: '2px' }} value={options.cellWidth} onChange={e => setOptions({...options, cellWidth: parseInt(e.target.value)||0})} />
-                       <span>px</span>
-                     </div>
-                  高さ(1セル):<div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                <input type="number" className="input-field" style={{ width: '50px', padding: '2px' }} value={options.cellHeight1} onChange={e => setOptions({...options, cellHeight1: parseInt(e.target.value)||0})} />
-                                <span>px</span>
-                              </div>
-                  <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>(3x3合計で {options.cellWidth*3}x{options.cellHeight1*3} px)</span>
+              {options.boardCellMode === '2x1' && (
+                <div style={{ fontSize: '0.85rem' }}>
+                  <span>アルファベットの配置:</span>
+                  <div style={{ display: 'flex', gap: '12px', marginTop: '4px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                      <input type="radio" name="alphaPos" checked={options.alphabetPos === 'top'} onChange={() => setOptions({ ...options, alphabetPos: 'top' })} /> 上のセル
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                      <input type="radio" name="alphaPos" checked={options.alphabetPos === 'bottom'} onChange={() => setOptions({ ...options, alphabetPos: 'bottom' })} /> 下のセル
+                    </label>
+                  </div>
                 </div>
               )}
             </div>
@@ -207,17 +351,67 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ initialOptions, hasS
 
           {/* フォント設定 */}
           <section>
-            <h4 style={{ fontSize: '0.9rem', color: 'var(--primary-color)', marginBottom: '10px' }}>【フォントサイズ】</h4>
-            <div style={{ display: 'flex', gap: '20px', paddingLeft: '10px', fontSize: '0.85rem', alignItems: 'center' }}>
-              <label>
-                数字/英字: <input type="number" className="input-field" style={{ width: '50px', padding: '2px' }} value={options.fontSizeSmall} onChange={e => setOptions({...options, fontSizeSmall: parseInt(e.target.value)||10})} /> pt
-              </label>
-              <label>
-                漢字: <input type="number" className="input-field" style={{ width: '50px', padding: '2px' }} value={options.fontSizeLarge} onChange={e => setOptions({...options, fontSizeLarge: parseInt(e.target.value)||14})} /> pt
-              </label>
-              <label>
-                リスト: <input type="number" className="input-field" style={{ width: '50px', padding: '2px' }} value={options.listFontSize} onChange={e => setOptions({...options, listFontSize: parseInt(e.target.value)||11})} /> pt
-              </label>
+            <h4 style={{ fontSize: '0.9rem', color: 'var(--primary-color)', marginBottom: '10px' }}>【フォント】</h4>
+            <div style={{ paddingLeft: '10px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.85rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>フォント名:</span>
+                  <select
+                    className="input-field"
+                    style={{ flex: 1, padding: '4px' }}
+                    value={options.fontName}
+                    onChange={e => setOptions({ ...options, fontName: e.target.value })}
+                  >
+                    <optgroup label="PCにインストール済みのフォント">
+                      {availablePresets.map(font => (
+                        <option key={font} value={font}>{font}</option>
+                      ))}
+                    </optgroup>
+                    {localFonts.length > 0 && (
+                      <optgroup label="すべてのフォント">
+                        {localFonts.filter(f => !availablePresets.includes(f)).map(font => (
+                          <option key={font} value={font}>{font}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </select>
+                  {localFonts.length === 0 && (
+                    <button
+                      className="btn-secondary"
+                      style={{ fontSize: '0.7rem', padding: '4px 8px', whiteSpace: 'nowrap' }}
+                      onClick={handleGetFonts}
+                      disabled={isLoadingFonts}
+                    >
+                      {isLoadingFonts ? '読込中...' : 'PCのフォントを読込'}
+                    </button>
+                  )}
+                </div>
+                
+                {localFonts.length === 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>※リストにない場合は直接入力も可:</span>
+                    <input
+                      type="text"
+                      className="input-field"
+                      style={{ flex: 1, padding: '2px 8px', fontSize: '0.8rem' }}
+                      value={options.fontName}
+                      onChange={e => setOptions({ ...options, fontName: e.target.value })}
+                      placeholder="フォント名を正確に入力"
+                    />
+                  </div>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: '15px', fontSize: '0.85rem', alignItems: 'center' }}>
+                <label>
+                  数字/英字: <input type="number" className="input-field" style={{ width: '45px', padding: '2px' }} value={options.fontSizeSmall} onChange={e => setOptions({ ...options, fontSizeSmall: parseInt(e.target.value) || 10 })} /> pt
+                </label>
+                <label>
+                  漢字: <input type="number" className="input-field" style={{ width: '45px', padding: '2px' }} value={options.fontSizeLarge} onChange={e => setOptions({ ...options, fontSizeLarge: parseInt(e.target.value) || 14 })} /> pt
+                </label>
+                <label>
+                  リスト: <input type="number" className="input-field" style={{ width: '45px', padding: '2px' }} value={options.listFontSize} onChange={e => setOptions({ ...options, listFontSize: parseInt(e.target.value) || 11 })} /> pt
+                </label>
+              </div>
             </div>
           </section>
 
@@ -226,19 +420,19 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ initialOptions, hasS
             <h4 style={{ fontSize: '0.9rem', color: 'var(--primary-color)', marginBottom: '10px' }}>【解答欄の出力形式】</h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingLeft: '10px' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                <input 
-                  type="radio" 
-                  name="answerMode" 
-                  checked={options.answerAreaMode === '1x1'} 
+                <input
+                  type="radio"
+                  name="answerMode"
+                  checked={options.answerAreaMode === '1x1'}
                   onChange={() => setOptions({ ...options, answerAreaMode: '1x1' })}
                 />
                 1マス ＝ 1セル (アルファベットを左上に配置)
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                <input 
-                  type="radio" 
-                  name="answerMode" 
-                  checked={options.answerAreaMode === '2x1'} 
+                <input
+                  type="radio"
+                  name="answerMode"
+                  checked={options.answerAreaMode === '2x1'}
                   onChange={() => setOptions({ ...options, answerAreaMode: '2x1' })}
                 />
                 1マス ＝ 2セル (縦に並べる)
@@ -253,35 +447,35 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ initialOptions, hasS
               <div style={{ display: 'flex', gap: '12px', fontSize: '0.9rem' }}>
                 <span>配置場所:</span>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-                  <input 
-                    type="radio" 
-                    name="listPlace" 
-                    checked={options.listPlacement === 'bottom'} 
+                  <input
+                    type="radio"
+                    name="listPlace"
+                    checked={options.listPlacement === 'bottom'}
                     onChange={() => setOptions({ ...options, listPlacement: 'bottom' })}
                   /> 盤面の下
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-                  <input 
-                    type="radio" 
-                    name="listPlace" 
-                    checked={options.listPlacement === 'right'} 
+                  <input
+                    type="radio"
+                    name="listPlace"
+                    checked={options.listPlacement === 'right'}
                     onChange={() => setOptions({ ...options, listPlacement: 'right' })}
                   /> 盤面の右
                 </label>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.9rem' }}>
                 <label htmlFor="listCols">表示段数:</label>
-                <input 
+                <input
                   id="listCols"
-                  type="number" 
-                  min="1" 
-                  max="10" 
-                  className="input-field" 
+                  type="number"
+                  min="1"
+                  max="10"
+                  className="input-field"
                   style={{ width: '60px', padding: '4px' }}
                   value={options.listColumns}
                   onChange={(e) => setOptions({ ...options, listColumns: parseInt(e.target.value) || 1 })}
                 />
-                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>※通常は4段程度</span>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>※ノーマルは4段程度</span>
               </div>
             </div>
           </section>
@@ -292,19 +486,19 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ initialOptions, hasS
               <h4 style={{ fontSize: '0.9rem', color: 'var(--primary-color)', marginBottom: '10px' }}>【「超」問題のレイアウト】</h4>
               <div style={{ display: 'flex', gap: '20px', paddingLeft: '10px' }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                  <input 
-                    type="radio" 
-                    name="superLayout" 
-                    checked={options.superLayout === 'separate'} 
+                  <input
+                    type="radio"
+                    name="superLayout"
+                    checked={options.superLayout === 'separate'}
                     onChange={() => setOptions({ ...options, superLayout: 'separate' })}
                   />
                   別シートに出力
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                  <input 
-                    type="radio" 
-                    name="superLayout" 
-                    checked={options.superLayout === 'single'} 
+                  <input
+                    type="radio"
+                    name="superLayout"
+                    checked={options.superLayout === 'single'}
                     onChange={() => setOptions({ ...options, superLayout: 'single' })}
                   />
                   同一シートに出力

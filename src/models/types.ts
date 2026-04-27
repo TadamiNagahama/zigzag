@@ -20,6 +20,8 @@ export interface Cell {
   mergedSize?: { width: number, height: number }; // 結合サイズ (親マスのみが保持する)
 }
 
+export type PuzzleType = 'ノーマル' | 'Wリスト' | 'Wリスト★' | 'ナンバーレス' | '部分ナンバーレス' | 'ウルトラ超' | '変則' | '矢印';
+
 export interface PuzzleData {
   id?: number; // Dexie用のプライマリキー
   firebaseId?: string; // FirestoreのドキュメントID
@@ -28,6 +30,7 @@ export interface PuzzleData {
   width: number; // ヨコ
   height: number; // タテ
   patternType: 1 | 2 | 3; // Type 1: 基本, Type 2: 2段, Type 3: 3x3
+  puzzleType?: PuzzleType; // パズルの種類
   cells: Cell[][];
   wordList: Record<number, string>; // 番号 -> 単語
   isArrowMode?: boolean; // リストに矢印を付けるモード
@@ -40,6 +43,9 @@ export interface PuzzleData {
   remainingAnswerWord?: string; // 解答余りで選択された単語
   boardTitle?: string; // 盤面表示用タイトル
   shadingColor?: string; // 網掛けの色
+  boardFontWeight?: 'normal' | 'bold'; // 盤面のフォントの太さ
+  boardFontFamily?: string; // 盤面のフォント名
+  tags?: string[]; // タグ一覧
   updatedAt: number;
 }
 

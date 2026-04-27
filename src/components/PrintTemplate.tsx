@@ -1,5 +1,5 @@
 import React from 'react';
-import { type PuzzleData, type Cell, type PrintOptions } from '../models/types';
+import { type PuzzleData, type PrintOptions } from '../models/types';
 
 interface PrintTemplateProps {
   puzzle: PuzzleData;
@@ -29,11 +29,22 @@ export const PrintTemplate: React.FC<PrintTemplateProps> = ({ puzzle, options, a
                 <div key={char} style={{ 
                   width: cellSize, height: cellSize, 
                   borderRight: cIdx === group.length - 1 ? 'none' : '0.5pt solid black',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative'
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
+                  backgroundColor: '#e2e8f0'
                 }}>
-                  <span style={{ position: 'absolute', top: '1px', left: '2px', fontSize: '8pt', fontWeight: 'bold' }}>{char}</span>
+                  <div style={{
+                    position: 'absolute',
+                    top: '50%',
+                    left: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    width: '94%',
+                    height: '94%',
+                    border: '0.5pt solid #d1d5db',
+                    zIndex: 1
+                  }} />
+                  <span style={{ position: 'absolute', top: '1px', left: '2px', fontSize: '8pt', fontWeight: 'bold', color: '#dc2626', zIndex: 2 }}>{char}</span>
                   {isAnswer && answerChars[char] && (
-                    <span style={{ fontSize: '14pt', fontWeight: 'bold' }}>{answerChars[char]}</span>
+                    <span style={{ fontSize: '14pt', fontWeight: 'bold', zIndex: 3 }}>{answerChars[char]}</span>
                   )}
                 </div>
               ))}
@@ -96,7 +107,7 @@ export const PrintTemplate: React.FC<PrintTemplateProps> = ({ puzzle, options, a
                   height: `${cellSize * spanH}px`,
                   borderBottom: '1pt solid black',
                   borderRight: '1pt solid black',
-                  backgroundColor: cell.type === 'wall' ? '#333' : (cell.isShaded ? shadingColor : 'white'),
+                  backgroundColor: cell.type === 'wall' ? '#333' : (cell.answerKey ? '#e2e8f0' : (cell.isShaded ? shadingColor : 'white')),
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -107,17 +118,19 @@ export const PrintTemplate: React.FC<PrintTemplateProps> = ({ puzzle, options, a
                 {showNumber && (
                   <span style={{
                     position: 'absolute',
-                    top: '1px',
-                    left: '2px',
+                    top: '0px',
+                    left: '1px',
                     fontSize: `${cellSize * 0.3}px`,
                     fontWeight: 'bold',
-                    lineHeight: 1
+                    lineHeight: 1,
+                    zIndex: 3
                   }}>{cell.number}</span>
                 )}
                 {showChar && (
                   <span style={{
                     fontSize: `${cellSize * 0.55}px`,
                     fontWeight: 'bold',
+                    zIndex: 2
                   }}>{showChar}</span>
                 )}
                 {showArrow && (
@@ -127,17 +140,31 @@ export const PrintTemplate: React.FC<PrintTemplateProps> = ({ puzzle, options, a
                     right: '2px',
                     fontSize: `${cellSize * 0.3}px`,
                     fontWeight: 'bold',
+                    zIndex: 3
                   }}>{puzzle.wordDirections?.[cell.number || 0]}</span>
                 )}
                 {showKey && (
-                  <span style={{
-                    position: 'absolute',
-                    bottom: '1px',
-                    right: '2px',
-                    fontSize: `${cellSize * 0.25}px`,
-                    fontWeight: 'bold',
-                    color: '#666'
-                  }}>{cell.answerKey}</span>
+                  <>
+                    <div style={{
+                      position: 'absolute',
+                      top: '50%',
+                      left: '50%',
+                      transform: 'translate(-50%, -50%)',
+                      width: '94%',
+                      height: '94%',
+                      border: '0.5pt solid #d1d5db',
+                      zIndex: 1
+                    }} />
+                    <span style={{
+                      position: 'absolute',
+                      bottom: '0px',
+                      right: '1px',
+                      fontSize: `${cellSize * 0.3}px`,
+                      fontWeight: 'bold',
+                      color: '#dc2626',
+                      zIndex: 2
+                    }}>{cell.answerKey}</span>
+                  </>
                 )}
               </div>
             );
@@ -146,7 +173,6 @@ export const PrintTemplate: React.FC<PrintTemplateProps> = ({ puzzle, options, a
       </div>
     );
   };
-
   const renderLists = () => {
     const numbers = Array.from(puzzle.cells.reduce((acc, row) => {
       row.forEach(cell => {
@@ -157,6 +183,14 @@ export const PrintTemplate: React.FC<PrintTemplateProps> = ({ puzzle, options, a
 
     const colsCount = options.listColumns || 2;
     const itemsPerCol = Math.ceil(numbers.length / colsCount);
+    
+    // 最長単語に基づいたフォントサイズ計算
+    const allWords = Object.values(puzzle.wordList || {}).filter(w => w && typeof w === 'string' && w.trim() !== '');
+    const longestWordChars = allWords.length > 0 ? Math.max(...allWords.map(w => w.length), 3) : 3;
+    const colWidthPt = 540 / (colsCount || 1);
+    const estimatedChars = longestWordChars + 5;
+    const autoFontSize = Math.max(6, Math.min(11, Math.floor(colWidthPt / (estimatedChars * 0.75))));
+
     const columns = [];
     for (let i = 0; i < colsCount; i++) {
       columns.push(numbers.slice(i * itemsPerCol, (i + 1) * itemsPerCol));
@@ -165,7 +199,10 @@ export const PrintTemplate: React.FC<PrintTemplateProps> = ({ puzzle, options, a
     const renderColumn = (nums: number[]) => (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px' }}>
         {nums.map(num => (
-          <div key={num} style={{ display: 'flex', gap: '4px', borderBottom: '0.3pt solid #ccc', paddingBottom: '1px', fontSize: colsCount > 6 ? '7pt' : (colsCount > 4 ? '8pt' : '9pt') }}>
+          <div key={num} style={{ 
+            display: 'flex', gap: '4px', borderBottom: '0.3pt solid #ccc', paddingBottom: '1px', 
+            fontSize: `${autoFontSize}pt` 
+          }}>
             <span style={{ fontWeight: 'bold', minWidth: '1.2rem' }}>{num}.</span>
             {puzzle.isArrowMode && (
               <span style={{ minWidth: '0.8rem' }}>{puzzle.wordDirections?.[num] !== '?' ? puzzle.wordDirections?.[num] : ''}</span>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileDown, Plus, Layout as LayoutIcon, Undo2, Redo2, LogIn, LogOut } from 'lucide-react';
+import { FileDown, Plus, Layout as LayoutIcon, Undo2, Redo2, LogIn, LogOut, HelpCircle } from 'lucide-react';
 import { type User } from 'firebase/auth';
 
 interface LayoutProps {
@@ -15,12 +15,13 @@ interface LayoutProps {
   user: User | null;
   onLogin: () => void;
   onLogout: () => void;
+  onHelp: () => void;
 }
 
 export const Layout: React.FC<LayoutProps> = ({ 
   children, onExport, onNew, onSave, onLoad, 
   undo, redo, canUndo, canRedo,
-  user, onLogin, onLogout
+  user, onLogin, onLogout, onHelp
 }) => {
   return (
     <div className="layout-container">
@@ -75,6 +76,23 @@ export const Layout: React.FC<LayoutProps> = ({
           </button>
           <button onClick={onExport} className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             <FileDown size={18} /> Excel出力
+          </button>
+          <button 
+            onClick={onHelp} 
+            className="btn-secondary" 
+            style={{ 
+              padding: '8px', 
+              borderRadius: '50%', 
+              width: '36px', 
+              height: '36px', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              marginLeft: '4px'
+            }}
+            title="ヘルプ"
+          >
+            <HelpCircle size={20} />
           </button>
         </div>
       </header>

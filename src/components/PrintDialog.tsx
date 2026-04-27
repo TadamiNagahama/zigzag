@@ -1,19 +1,41 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { X, Printer } from 'lucide-react';
 import { type PrintOptions } from '../models/types';
 
 interface PrintDialogProps {
   onClose: () => void;
   onPrint: (options: PrintOptions) => void;
+  wordList: Record<number, string> | null | undefined;
 }
 
-export const PrintDialog: React.FC<PrintDialogProps> = ({ onClose, onPrint }) => {
+export const PrintDialog: React.FC<PrintDialogProps> = ({ onClose, onPrint, wordList }) => {
   const [options, setOptions] = useState<PrintOptions>({
     printProblem: true,
     printAnswer: false,
     layout: 'combined',
     listColumns: 5
   });
+
+  // 最長単語と推定フォントサイズの計算
+  const longestWordInfo = useMemo(() => {
+    if (!wordList) return null;
+    const words = Object.values(wordList).filter(w => w && typeof w === 'string' && w.trim() !== '');
+    if (words.length === 0) return null;
+    
+    const longest = [...words].sort((a, b) => b.length - a.length)[0];
+    if (!longest) return null;
+
+    const colWidthPt = 540 / options.listColumns;
+    const estimatedChars = longest.length + 5;
+    const fontSize = Math.max(6, Math.min(11, Math.floor(colWidthPt / (estimatedChars * 0.75))));
+    const widthPercent = (fontSize * estimatedChars * 0.75 / colWidthPt) * 100;
+
+    return {
+      word: longest,
+      fontSize,
+      widthPercent
+    };
+  }, [wordList, options.listColumns]);
 
   const handlePrint = () => {
     onPrint(options);
@@ -63,10 +85,7 @@ export const PrintDialog: React.FC<PrintDialogProps> = ({ onClose, onPrint }) =>
 
         {options.printProblem && (
           <section style={{ marginBottom: '24px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-              <h3 style={{ fontSize: '0.95rem', margin: 0, color: 'var(--primary-color)' }}>レイアウト（問題面）</h3>
-            </div>
-            
+            <h3 style={{ fontSize: '0.95rem', marginBottom: '12px', color: 'var(--primary-color)' }}>レイアウト（問題面）</h3>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
               <div 
                 onClick={() => setOptions({ ...options, layout: 'combined' })}
@@ -96,7 +115,7 @@ export const PrintDialog: React.FC<PrintDialogProps> = ({ onClose, onPrint }) =>
               </div>
             </div>
 
-            <div>
+            <div style={{ marginBottom: '16px' }}>
               <label style={{ fontSize: '0.85rem', fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>
                 単語リストの段数: {options.listColumns}段
               </label>
@@ -122,6 +141,35 @@ export const PrintDialog: React.FC<PrintDialogProps> = ({ onClose, onPrint }) =>
                 ))}
               </div>
             </div>
+
+            {longestWordInfo && (
+              <div style={{ 
+                padding: '12px', background: 'var(--bg-secondary)', borderRadius: '8px', 
+                border: '1px dashed var(--border-color)', fontSize: '0.8rem'
+              }}>
+                <div style={{ fontWeight: 'bold', color: 'var(--text-muted)', marginBottom: '8px', fontSize: '0.75rem' }}>
+                  収まりプレビュー（最長単語）
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>最長:「{longestWordInfo.word}」</span>
+                    <span style={{ fontWeight: 'bold', color: 'var(--primary-color)' }}>推定 {longestWordInfo.fontSize}pt</span>
+                  </div>
+                  <div style={{ 
+                    width: '100%', height: '2px', background: 'var(--border-color)', 
+                    position: 'relative', marginTop: '4px' 
+                  }}>
+                    <div style={{ 
+                      width: `${Math.min(100, longestWordInfo.widthPercent)}%`, 
+                      height: '100%', background: 'var(--primary-color)' 
+                    }} />
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    ※ {options.listColumns}段の場合、このサイズまで大きく印刷されます
+                  </div>
+                </div>
+              </div>
+            )}
           </section>
         )}
 

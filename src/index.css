@@ -165,7 +165,7 @@ button:disabled {
   align-items: center;
   justify-content: center;
   background: var(--card-bg);
-  border-radius: 16px;
+  border-radius: 4px;
   overflow: auto;
   position: relative;
 }

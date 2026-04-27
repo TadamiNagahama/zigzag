@@ -1,5 +1,5 @@
 import { useCallback, useEffect } from 'react';
-import { type PuzzleData, type Cell } from '../models/types';
+import { type PuzzleData, type Cell, type PuzzleType } from '../models/types';
 import { db } from '../models/db';
 import { useUndoRedo } from './useUndoRedo';
 
@@ -19,12 +19,15 @@ const createEmptyPuzzle = (w: number, h: number): PuzzleData => {
     width: w,
     height: h,
     patternType: 1,
+    puzzleType: 'ノーマル',
     cells,
     wordList: {},
     isWList: false,
     isWListStar: false,
     wordList2: [''],
     shadingColor: '#e2e8f0', // デフォルトは薄いグレー (slate-200相当)
+    boardFontWeight: 'normal',
+    boardFontFamily: '',
     updatedAt: Date.now()
   };
 };
@@ -33,7 +36,7 @@ const createEmptyPuzzle = (w: number, h: number): PuzzleData => {
  * 盤面の左上から右下へ走査し、番号を再割り当てする
  */
 const recomputeNumbers = (
-  cells: Cell[][], 
+  cells: Cell[][],
   currentWordList: Record<number, string>,
   currentWordDirections?: Record<number, string>,
   currentWordStarList?: Record<number, boolean>
@@ -66,7 +69,7 @@ const recomputeNumbers = (
     if (newCell.type === 'normal' && newCell.isNumbered && !newCell.mergedParent) {
       const num = count++;
       newCell.number = num;
-      
+
       // 2. 元の座標に単語があれば新しい番号に引き継ぐ
       const word = coordsToWord[`${cell.x},${cell.y}`];
       if (word) {
@@ -95,14 +98,14 @@ const recomputeNumbersWithDirections = (cells: Cell[][], currentWordList: Record
 };
 
 export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
-  const { 
-    state: puzzle, 
-    setState: setPuzzle, 
+  const {
+    state: puzzle,
+    setState: setPuzzle,
     push,
     reset: resetInternal,
     undo,
     redo,
-    canUndo, 
+    canUndo,
     canRedo
   } = useUndoRedo<PuzzleData>(createEmptyPuzzle(initialWidth, initialHeight));
 
@@ -157,15 +160,15 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
         newCells.push(row);
       }
       const { cells: finalCells, wordList: finalWordList, wordDirections: finalWordDirections, wordStarList: finalWordStarList } = recomputeNumbersWithDirections(newCells, prev.wordList, prev.wordDirections, prev.wordStarList);
-      return { 
-        ...prev, 
-        width: w, 
-        height: h, 
-        cells: finalCells, 
+      return {
+        ...prev,
+        width: w,
+        height: h,
+        cells: finalCells,
         wordList: finalWordList,
         wordDirections: finalWordDirections,
         wordStarList: finalWordStarList,
-        updatedAt: Date.now() 
+        updatedAt: Date.now()
       };
     });
   }, [push]);
@@ -190,7 +193,7 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
       const newCells = prev.cells.map(row => row.map(cell => ({ ...cell })));
       const cell = newCells[y][x];
       if (cell.type === 'wall' || cell.mergedParent) return prev;
-      
+
       cell.isNumbered = !cell.isNumbered;
       if (!cell.isNumbered) {
         cell.char = '';
@@ -218,7 +221,7 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
       const isStar = prev.wordStarList?.[number];
       const newCells = prev.cells.map(row => row.map(cell => {
         if (cell.number === number) {
-          return { ...cell, char: isStar ? '' : word.charAt(0) }; 
+          return { ...cell, char: isStar ? '' : word.charAt(0) };
         }
         return { ...cell };
       }));
@@ -259,6 +262,17 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
     push(prev => ({ ...prev, isArrowMode, updatedAt: Date.now() }));
   }, [push]);
 
+  const setPuzzleType = useCallback((puzzleType: PuzzleType) => {
+    push(prev => ({
+      ...prev,
+      puzzleType,
+      isWList: puzzleType === 'Wリスト',
+      isWListStar: puzzleType === 'Wリスト★',
+      isArrowMode: puzzleType === '矢印',
+      updatedAt: Date.now()
+    }));
+  }, [push]);
+
   const setIsWList = useCallback((isWList: boolean) => {
     push(prev => ({ ...prev, isWList, updatedAt: Date.now() }));
   }, [push]);
@@ -291,8 +305,8 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
     });
   }, [push]);
 
-  const createNewBoard = useCallback(() => {
-    push(() => createEmptyPuzzle(initialWidth, initialHeight));
+  const createNewBoard = useCallback((h?: number, w?: number) => {
+    push(() => createEmptyPuzzle(w || initialWidth, h || initialHeight));
   }, [push, initialWidth, initialHeight]);
 
   const setAnswerKey = useCallback((x: number, y: number, key: string | null) => {
@@ -332,16 +346,40 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
     push(prev => ({ ...prev, shadingColor, updatedAt: Date.now() }));
   }, [push]);
 
+  const setBoardFontWeight = useCallback((boardFontWeight: 'normal' | 'bold') => {
+    push(prev => ({ ...prev, boardFontWeight, updatedAt: Date.now() }));
+  }, [push]);
+
+  const setBoardFontFamily = useCallback((boardFontFamily: string) => {
+    push(prev => ({ ...prev, boardFontFamily, updatedAt: Date.now() }));
+  }, [push]);
+
+  const addTag = useCallback((tag: string) => {
+    setPuzzle(prev => {
+      const currentTags = prev.tags || [];
+      if (currentTags.includes(tag)) return prev;
+      return { ...prev, tags: [...currentTags, tag], updatedAt: Date.now() };
+    });
+  }, [setPuzzle]);
+
+  const removeTag = useCallback((tag: string) => {
+    setPuzzle(prev => ({
+      ...prev,
+      tags: (prev.tags || []).filter(t => t !== tag),
+      updatedAt: Date.now()
+    }));
+  }, [setPuzzle]);
+
   const mergeCells = useCallback((x1: number, y1: number, x2: number, y2: number) => {
     push(prev => {
       const startX = Math.min(x1, x2);
       const endX = Math.max(x1, x2);
       const startY = Math.min(y1, y2);
       const endY = Math.max(y1, y2);
-      
+
       const width = endX - startX + 1;
       const height = endY - startY + 1;
-      
+
       if (width === 1 && height === 1) return prev;
 
       for (let y = startY; y <= endY; y++) {
@@ -355,7 +393,7 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
       }
 
       const newCells = prev.cells.map(row => row.map(cell => ({ ...cell })));
-      
+
       for (let y = startY; y <= endY; y++) {
         for (let x = startX; x <= endX; x++) {
           if (x === startX && y === startY) {
@@ -371,7 +409,7 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
           }
         }
       }
-      
+
       return { ...prev, ...recomputeNumbersWithDirections(newCells, prev.wordList, prev.wordDirections, prev.wordStarList), updatedAt: Date.now() };
     });
   }, [push]);
@@ -382,19 +420,19 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
       const parentX = cell.mergedParent ? cell.mergedParent.x : x;
       const parentY = cell.mergedParent ? cell.mergedParent.y : y;
       const parentCell = prev.cells[parentY][parentX];
-      
+
       if (!parentCell.mergedSize) return prev;
-      
+
       const { width, height } = parentCell.mergedSize;
       const newCells = prev.cells.map(row => row.map(cell => ({ ...cell })));
-      
+
       for (let j = parentY; j < parentY + height; j++) {
         for (let i = parentX; i < parentX + width; i++) {
           newCells[j][i].mergedParent = undefined;
           newCells[j][i].mergedSize = undefined;
         }
       }
-      
+
       return { ...prev, ...recomputeNumbersWithDirections(newCells, prev.wordList, prev.wordDirections, prev.wordStarList), updatedAt: Date.now() };
     });
   }, [push]);
@@ -412,17 +450,18 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
     return () => clearTimeout(timer);
   }, [puzzle]);
 
-  return { 
-    puzzle, 
-    setPuzzle, 
-    resizeBoard, 
-    toggleCellType, 
-    toggleNumberFlag, 
+  return {
+    puzzle,
+    setPuzzle,
+    resizeBoard,
+    toggleCellType,
+    toggleNumberFlag,
     setBoardTitle,
     updateWordList,
     toggleWordStar,
     updateWordDirection,
     setIsArrowMode,
+    setPuzzleType,
     setIsWList,
     setIsWListStar,
     setIsRemainingAnswer,
@@ -434,6 +473,10 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
     updateCellChar,
     updateCellAnswerChar,
     setShadingColor,
+    setBoardFontWeight,
+    setBoardFontFamily,
+    addTag,
+    removeTag,
     mergeCells,
     splitCell,
     takeCheckpoint,

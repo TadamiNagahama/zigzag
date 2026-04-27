@@ -4,7 +4,18 @@ import type { ExportOptions } from '../components/ExportDialog';
 
 // 単位変換関数 (px -> Excel単位)
 const pxToPoints = (px: number) => px * 0.75;
-const pxToChars = (px: number) => Math.max(0, (px - 5) / 5.5);
+const pxToChars = (px: number) => Math.max(0, (px - 5) / 8); // ピクセル数からExcelの列幅（文字数）への変換精度を修正。
+
+// ウェブのフォントファミリーをExcel用のフォント名に変換
+const getExcelFontName = (family?: string) => {
+  if (!family) return 'MS Pゴシック';
+  const f = family.toLowerCase();
+  if (f.includes('mincho')) return 'MS 明朝';
+  if (f.includes('meiryo')) return 'メイリオ';
+  if (f.includes('gothic')) return 'MS Pゴシック';
+  if (f === 'serif') return 'MS 明朝';
+  return 'MS Pゴシック';
+};
 
 /**
  * 指定されたワークシートにパズルの一式を描画する内部関数
@@ -17,13 +28,18 @@ const renderPuzzleSection = (
   isQuestion: boolean,
   includeWordList: boolean
 ) => {
-  const defaultFontName = 'MS Pゴシック';
-  const defaultFont = { name: defaultFontName, size: 11 };
+  const defaultFontName = options.fontName || 'MS Pゴシック';
+  const isBold = puzzle.boardFontWeight === 'bold';
+  const defaultFont = { name: defaultFontName, size: 11, bold: isBold };
 
   // 使用されているアルファベットを抽出してグループ化
   const usedKeys = new Set<string>();
+  const keyToChar: Record<string, string> = {};
   puzzle.cells.forEach(row => row.forEach(cell => {
-    if (cell.answerKey) usedKeys.add(cell.answerKey);
+    if (cell.answerKey) {
+      usedKeys.add(cell.answerKey);
+      if (cell.answerChar) keyToChar[cell.answerKey] = cell.answerChar;
+    }
   }));
   const uniqueSorted = Array.from(usedKeys).sort();
   const alphabetGroups: string[][] = [];
@@ -51,7 +67,7 @@ const renderPuzzleSection = (
   const boardWidth = Math.max(alphabetGroups.reduce((acc, g) => acc + g.length, 0), puzzle.width * colStep);
   
   if (boardWidth > 1) {
-    worksheet.mergeCells(titleRow, 1, titleRow, boardWidth + 1);
+    worksheet.mergeCells(titleRow, 1, titleRow, boardWidth);
   }
   const titleCell = worksheet.getCell(titleRow, 1);
   titleCell.value = displayTitle;
@@ -66,6 +82,12 @@ const renderPuzzleSection = (
   worksheet.getRow(boxesRow).height = pxToPoints(boardRowH);
 
   let answerColOffset = 0;
+  // 「解答欄」ラベル
+  if (alphabetGroups.length > 0) {
+    const answerLabelCell = worksheet.getCell(labelRow, 2);
+    answerLabelCell.value = '解答欄';
+    answerLabelCell.font = { ...defaultFont, bold: true };
+  }
   alphabetGroups.forEach((group) => {
     group.forEach((alphabet) => {
       const col = 2 + answerColOffset;
@@ -73,14 +95,23 @@ const renderPuzzleSection = (
 
       if (options.answerAreaMode === '1x1') {
         const cell = worksheet.getCell(boxesRow, col);
-        cell.value = alphabet;
+        const ans = isQuestion ? '' : (keyToChar[alphabet] || '');
+        if (!ans) {
+          cell.value = alphabet;
+          cell.font = { name: defaultFontName, size: options.fontSizeSmall };
+        } else {
+          cell.value = {
+            richText: [
+              { font: { name: defaultFontName, size: options.fontSizeSmall }, text: alphabet + '\n' },
+              { font: { name: defaultFontName, size: 14 }, text: ' ' + ans }
+            ]
+          };
+        }
         cell.border = {
           top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' }
         };
-        cell.font = { name: defaultFontName, size: options.fontSizeSmall };
         cell.alignment = { 
-          vertical: 'top', horizontal: 'left',
-          shrinkToFit: options.boardNewline ? false : true 
+          vertical: 'top', horizontal: 'left', wrapText: true
         };
       } else {
         worksheet.getRow(boxesRow).height = pxToPoints(options.cellHeight1);
@@ -88,12 +119,15 @@ const renderPuzzleSection = (
         const topCell = worksheet.getCell(boxesRow, col);
         const bottomCell = worksheet.getCell(boxesRow + 1, col);
         topCell.value = alphabet;
+        const ans = isQuestion ? '' : (keyToChar[alphabet] || '');
+        bottomCell.value = ans ? (' ' + ans) : '';
         topCell.font = { name: defaultFontName, size: options.fontSizeSmall };
+        bottomCell.font = { name: defaultFontName, size: 14 };
         topCell.border = { top: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
         bottomCell.border = { bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
-        [topCell, bottomCell].forEach(c => {
-          c.alignment = { vertical: 'middle', horizontal: 'center', shrinkToFit: true };
-        });
+        
+        topCell.alignment = { vertical: 'middle', horizontal: 'left', shrinkToFit: true };
+        bottomCell.alignment = { vertical: 'middle', horizontal: 'center', shrinkToFit: true };
       }
       worksheet.getColumn(col).width = pxToChars(options.cellWidth);
     });
@@ -110,7 +144,7 @@ const renderPuzzleSection = (
     const boxEndCol = boxStartCol + 4;
     worksheet.mergeCells(boxesRow, boxStartCol, (options.answerAreaMode === '2x1' ? boxesRow + 1 : boxesRow), boxEndCol);
     const remainingBox = worksheet.getCell(boxesRow, boxStartCol);
-    remainingBox.value = puzzle.remainingAnswerWord || '';
+    remainingBox.value = isQuestion ? '' : (puzzle.remainingAnswerWord || '');
     remainingBox.border = {
       top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' }
     };
@@ -124,7 +158,7 @@ const renderPuzzleSection = (
   const shadingFill: ExcelJS.Fill = {
     type: 'pattern',
     pattern: 'solid',
-    fgColor: { argb: 'FFE0E0E0' }
+    fgColor: { argb: 'FFD9D9D9' } // 15%グレー
   };
 
   for (let py = 0; py < puzzle.height; py++) {
@@ -139,6 +173,11 @@ const renderPuzzleSection = (
       const mh = (cell.mergedSize?.height || 1);
       const excelW = mw * colStep;
       const excelH = mh * rowStep;
+
+      // 盤面の列幅を明示的に設定（他設定との干渉による幅の誤加算を防止）
+      for (let c = 0; c < excelW; c++) {
+        worksheet.getColumn(ex + c).width = pxToChars(options.cellWidth);
+      }
 
       if (mw > 1 || mh > 1) {
         worksheet.mergeCells(ey, ex, ey + excelH - 1, ex + excelW - 1);
@@ -155,7 +194,7 @@ const renderPuzzleSection = (
           if (c === excelW - 1) border.right = { style: 'thin' };
           cCell.border = border;
           
-          if (cell.isShaded) {
+          if (cell.isShaded || cell.answerKey) {
             cCell.fill = shadingFill;
           }
         }
@@ -169,17 +208,14 @@ const renderPuzzleSection = (
       const alpha = (!hideContent) ? (cell.answerKey || '') : '';
 
       if (options.boardCellMode === '1x1') {
+        worksheet.getRow(ey).height = pxToPoints(options.cellHeight1);
         let val = '';
         if (num) val += num;
-        if (hintChar) {
+        const displayChar = answerChar || hintChar;
+        if (displayChar) {
           if (val && options.boardNewline) val += '\n';
           else if (val) val += ' ';
-          val += hintChar;
-        }
-        if (answerChar) {
-          if (val && options.boardNewline && !hintChar) val += '\n';
-          else if (val) val += ' ';
-          val += answerChar;
+          val += displayChar;
         }
         if (alpha) {
           if (val) val += ' ';
@@ -187,7 +223,11 @@ const renderPuzzleSection = (
         }
         const targetCell = worksheet.getCell(ey, ex);
         targetCell.value = val;
-        targetCell.font = { name: defaultFontName, size: (hintChar || answerChar) ? options.fontSizeLarge : options.fontSizeSmall };
+        targetCell.font = { 
+          name: defaultFontName, 
+          size: (hintChar || answerChar) ? options.fontSizeLarge : options.fontSizeSmall,
+          bold: isBold
+        };
         targetCell.alignment = { 
           wrapText: options.boardNewline, vertical: 'top', horizontal: 'left',
           shrinkToFit: options.boardNewline ? false : true
@@ -202,17 +242,16 @@ const renderPuzzleSection = (
           topCell.font = { name: defaultFontName, size: options.fontSizeSmall };
         }
         if (hintChar || answerChar) {
-          bottomCell.value = hintChar + (answerChar ? (hintChar ? ' ' : '') + answerChar : '');
-          bottomCell.font = { name: defaultFontName, size: options.fontSizeLarge };
+          bottomCell.value = answerChar || hintChar;
+          bottomCell.font = { name: defaultFontName, size: options.fontSizeLarge, bold: isBold };
         }
         if (alpha) {
           const alphaCell = options.alphabetPos === 'top' ? topCell : bottomCell;
           alphaCell.value = (alphaCell.value ? alphaCell.value + ' ' : '') + alpha;
           alphaCell.font = { name: defaultFontName, size: options.fontSizeSmall };
         }
-        [topCell, bottomCell].forEach(c => {
-          c.alignment = { vertical: 'middle', horizontal: 'center', shrinkToFit: true };
-        });
+        topCell.alignment = { vertical: 'middle', horizontal: 'left', shrinkToFit: true };
+        bottomCell.alignment = { vertical: 'middle', horizontal: 'center', shrinkToFit: true };
       } else {
         for (let r = 0; r < 3; r++) worksheet.getRow(ey + r).height = pxToPoints(options.cellHeight1);
         if (num) {
@@ -223,8 +262,8 @@ const renderPuzzleSection = (
         }
         if (hintChar || answerChar) {
           const cCell = worksheet.getCell(ey + 1, ex + 1);
-          cCell.value = hintChar + (answerChar ? (hintChar ? ' ' : '') + answerChar : '');
-          cCell.font = { name: defaultFontName, size: options.fontSizeLarge };
+          cCell.value = answerChar || hintChar;
+          cCell.font = { name: defaultFontName, size: options.fontSizeLarge, bold: isBold };
           cCell.alignment = { vertical: 'middle', horizontal: 'center', shrinkToFit: true };
         }
         if (alpha) {
@@ -256,14 +295,21 @@ const renderPuzzleSection = (
   // 4. 単語リスト
   let nextRow = boardEndRow + 2;
   if (includeWordList) {
-    const wordEntries = Object.entries(puzzle.wordList).map(([id, word]) => ({ id: parseInt(id), word })).sort((a,b) => a.id - b.id);
+    const boardNumbers = new Set<number>();
+    puzzle.cells.forEach(row => row.forEach(cell => {
+      if (cell.number) boardNumbers.add(cell.number);
+    }));
+    const wordEntries = Array.from(boardNumbers).sort((a, b) => a - b).map(id => ({
+      id,
+      word: puzzle.wordList[id] || ''
+    }));
       const numCols = options.listColumns;
       const totalItems = wordEntries.length;
       const itemsPerCol = Math.ceil(totalItems / numCols);
       const isRight = options.listPlacement === 'right';
 
-      const cellsPerEntry = (options.boardCellMode === '3x3' && !isRight) ? 9 : 4;
-      const wordColOffset = (options.boardCellMode === '3x3' && !isRight) ? 1 : 2;
+      const cellsPerEntry = (options.boardCellMode === '3x3' && !isRight) ? 9 : 3;
+      const wordColOffset = 1; // 数字のすぐ右に単語を配置
 
       wordEntries.forEach((entry, index) => {
         let r, c, colIndex, rowIndex;
@@ -315,7 +361,39 @@ const renderPuzzleSection = (
           }
         }
       }
-  }
+
+      // 5. リスト2 (Wリスト / Wリスト★)
+      if ((puzzle.isWList || puzzle.isWListStar) && puzzle.wordList2 && puzzle.wordList2.length > 0) {
+        const list2Words = puzzle.wordList2.filter(w => w.trim() !== '');
+        if (list2Words.length > 0) {
+          const itemsPerCol2 = Math.ceil(list2Words.length / numCols);
+          const list2HeaderRow = (isRight ? boardStartRow + (itemsPerCol || 0) + 1 : nextRow + 1);
+          const list2StartCol = (isRight ? (puzzle.width + 1) * colStep + 1 : 1);
+          
+          // リスト2の見出しを追加
+          const hCell = worksheet.getCell(list2HeaderRow, list2StartCol + (puzzle.isArrowMode ? 2 : wordColOffset));
+          hCell.value = '＜リスト2＞';
+          hCell.font = { name: defaultFontName, size: options.listFontSize, bold: true };
+          if (!isRight) nextRow = list2HeaderRow;
+
+          const list2StartRow = list2HeaderRow + 1;
+          
+          list2Words.forEach((word, index) => {
+            const colIndex = Math.floor(index / itemsPerCol2);
+            const rowIndex = index % itemsPerCol2;
+            const r = list2StartRow + rowIndex;
+            const c = list2StartCol + colIndex * cellsPerEntry;
+            
+            const wCell = worksheet.getCell(r, c + (puzzle.isArrowMode ? 2 : wordColOffset));
+            wCell.value = word;
+            wCell.font = { name: defaultFontName, size: options.listFontSize };
+            wCell.alignment = { horizontal: 'left', vertical: 'middle' };
+            
+            if (!isRight) nextRow = Math.max(nextRow, r + 1);
+          });
+        }
+      }
+    }
 
   const maxCol = Math.max(puzzle.width * colStep + 10, 50);
   for (let i = 1; i <= maxCol; i++) {
@@ -332,25 +410,20 @@ export const exportToExcel = async (puzzle: PuzzleData, options: ExportOptions) 
   (workbook.properties as any).company = companyName;
   (workbook.properties as any).application = '漢字ジグザグ作成ツール';
 
-  if (options.exportMode === 'super') {
-    if (options.superLayout === 'separate') {
-      const ws1 = workbook.addWorksheet('問題');
-      ws1.views = [{ showGridLines: true }];
-      renderPuzzleSection(ws1, 1, puzzle, options, true, true);
-      
-      const ws2 = workbook.addWorksheet('解答');
-      ws2.views = [{ showGridLines: true }];
-      renderPuzzleSection(ws2, 1, puzzle, options, false, false);
-    } else {
-      const ws = workbook.addWorksheet('漢字ジグザグ');
-      ws.views = [{ showGridLines: true }];
-      const nextRow = renderPuzzleSection(ws, 1, puzzle, options, true, true);
-      renderPuzzleSection(ws, nextRow + 2, puzzle, options, false, false);
-    }
+  // 出力モード（網掛けの有無）に関わらず、常に問題と解答の両方を出力する
+  if (options.superLayout === 'separate') {
+    const ws1 = workbook.addWorksheet('問題');
+    ws1.views = [{ showGridLines: true }];
+    renderPuzzleSection(ws1, 1, puzzle, options, true, true);
+    
+    const ws2 = workbook.addWorksheet('解答');
+    ws2.views = [{ showGridLines: true }];
+    renderPuzzleSection(ws2, 1, puzzle, options, false, false);
   } else {
     const ws = workbook.addWorksheet('漢字ジグザグ');
     ws.views = [{ showGridLines: true }];
-    renderPuzzleSection(ws, 1, puzzle, options, false, true);
+    const nextRow = renderPuzzleSection(ws, 1, puzzle, options, true, true);
+    renderPuzzleSection(ws, nextRow + 2, puzzle, options, false, false);
   }
 
   const buffer = await workbook.xlsx.writeBuffer();
