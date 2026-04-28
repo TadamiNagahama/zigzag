@@ -98,15 +98,12 @@ const recomputeNumbersWithDirections = (cells: Cell[][], currentWordList: Record
 };
 
 const getInitialPuzzle = (w: number, h: number): PuzzleData => {
-  const savedSetting = localStorage.getItem('zigzag_autosave_setting');
-  if (savedSetting !== 'false') {
-    const savedData = localStorage.getItem('zigzag_autosave_data');
-    if (savedData) {
-      try {
-        return JSON.parse(savedData);
-      } catch (e) {
-        console.error('Failed to parse autosave data:', e);
-      }
+  const savedData = localStorage.getItem('zigzag_autosave_data');
+  if (savedData) {
+    try {
+      return JSON.parse(savedData);
+    } catch (e) {
+      console.error('Failed to parse autosave data:', e);
     }
   }
   return createEmptyPuzzle(w, h);

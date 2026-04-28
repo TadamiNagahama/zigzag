@@ -5,12 +5,12 @@ interface SettingsDialogProps {
   shadingColor: string;
   boardFontWeight: 'normal' | 'bold';
   boardFontFamily: string;
-  autoSave: boolean;
+  cloudAutoSave: boolean;
   onClose: () => void;
   onSetShadingColor: (color: string) => void;
   onSetFontWeight: (weight: 'normal' | 'bold') => void;
   onSetFontFamily: (family: string) => void;
-  onSetAutoSave: (autoSave: boolean) => void;
+  onSetCloudAutoSave: (cloudAutoSave: boolean) => void;
   version?: string;
 }
 
@@ -34,12 +34,12 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   shadingColor,
   boardFontWeight,
   boardFontFamily,
-  autoSave,
+  cloudAutoSave,
   onClose, 
   onSetShadingColor,
   onSetFontWeight,
   onSetFontFamily,
-  onSetAutoSave,
+  onSetCloudAutoSave,
   version = '0.0.1'
 }) => {
   return (
@@ -133,30 +133,30 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
             </div>
           </div>
 
-          {/* 自動保存設定 */}
+          {/* クラウド自動保存設定 */}
           <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div>
-                <div style={{ fontWeight: 'bold', fontSize: '0.95rem' }}>自動保存・復元</div>
+                <div style={{ fontWeight: 'bold', fontSize: '0.95rem' }}>オートセーブ</div>
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                  スリープ等による意図しない終了時に、前回の状態から再開します
+                  ※ログインかつ一度保存することが必須です。1分ごとにサーバーに保存されます。
                 </div>
               </div>
               <label style={{ position: 'relative', display: 'inline-block', width: '48px', height: '26px' }}>
                 <input 
                   type="checkbox" 
-                  checked={autoSave}
-                  onChange={(e) => onSetAutoSave(e.target.checked)}
+                  checked={cloudAutoSave}
+                  onChange={(e) => onSetCloudAutoSave(e.target.checked)}
                   style={{ opacity: 0, width: 0, height: 0 }}
                 />
                 <span style={{
                   position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0,
-                  backgroundColor: autoSave ? 'var(--primary-color)' : '#cbd5e1',
+                  backgroundColor: cloudAutoSave ? 'var(--primary-color)' : '#cbd5e1',
                   transition: '.4s', borderRadius: '34px'
                 }}>
                   <span style={{
                     position: 'absolute', content: '""', height: '20px', width: '20px',
-                    left: autoSave ? '24px' : '3px', bottom: '3px',
+                    left: cloudAutoSave ? '24px' : '3px', bottom: '3px',
                     backgroundColor: 'white', transition: '.4s', borderRadius: '50%'
                   }}></span>
                 </span>

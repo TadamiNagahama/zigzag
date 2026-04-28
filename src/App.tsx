@@ -92,26 +92,56 @@ function App() {
   const [confirmAction, setConfirmAction] = useState<{ message: string | React.ReactNode, onConfirm: () => void, isDestructive?: boolean } | null>(null);
   const [showMobileSettingsMenu, setShowMobileSettingsMenu] = useState(false);
 
-  // オートセーブの設定（デフォルトON）
-  const [autoSave, setAutoSave] = useState(() => {
-    const saved = localStorage.getItem('zigzag_autosave_setting');
-    return saved !== 'false';
+  // クラウド自動保存の設定（デフォルトOFF）
+  const [cloudAutoSave, setCloudAutoSave] = useState(() => {
+    const saved = localStorage.getItem('zigzag_cloud_autosave_setting');
+    return saved === 'true';
   });
 
-  // パズル状態が変わるたびに自動保存
+  // 最新のパズル状態を保持するref（setInterval用）
+  const latestPuzzleRef = useRef(puzzle);
   useEffect(() => {
-    if (autoSave) {
-      localStorage.setItem('zigzag_autosave_data', JSON.stringify(puzzle));
-    }
-  }, [puzzle, autoSave]);
+    latestPuzzleRef.current = puzzle;
+  }, [puzzle]);
 
-  // 設定変更時の処理
+  // ローカルへのバックアップは基本機能として常に実行
   useEffect(() => {
-    localStorage.setItem('zigzag_autosave_setting', autoSave.toString());
-    if (!autoSave) {
-      localStorage.removeItem('zigzag_autosave_data'); // OFFにしたら保存データを消す
-    }
-  }, [autoSave]);
+    localStorage.setItem('zigzag_autosave_data', JSON.stringify(puzzle));
+  }, [puzzle]);
+
+  // クラウド自動保存のオン/オフ設定を記憶
+  useEffect(() => {
+    localStorage.setItem('zigzag_cloud_autosave_setting', cloudAutoSave.toString());
+  }, [cloudAutoSave]);
+
+  // クラウドへの1分毎の自動保存処理
+  useEffect(() => {
+    if (!cloudAutoSave || !user) return;
+
+    const intervalId = setInterval(async () => {
+      const currentPuzzle = latestPuzzleRef.current;
+      // 1度も保存されていない（firebaseIdがない）場合はスキップ
+      if (!currentPuzzle.firebaseId) return;
+
+      try {
+        const puzzleToSave: any = {
+          ...currentPuzzle,
+          ownerId: user.uid,
+          updatedAt: Date.now()
+        };
+        puzzleToSave.cells = currentPuzzle.cells.flat();
+        delete puzzleToSave.id;
+
+        // FirebaseのupdateDocを直接呼び出す（importは上部にある前提）
+        await updateDoc(doc(dbFirestore, 'puzzles', currentPuzzle.firebaseId), puzzleToSave);
+        console.log('クラウドに自動保存しました:', new Date().toLocaleTimeString());
+      } catch (e) {
+        console.error('クラウド自動保存に失敗しました:', e);
+      }
+    }, 60000); // 60,000ミリ秒 = 1分
+
+    return () => clearInterval(intervalId);
+  }, [cloudAutoSave, user]);
 
   useEffect(() => {
     // 初回訪問（承諾済みでない）ならダイアログを表示
@@ -1447,12 +1477,12 @@ function App() {
           shadingColor={puzzle.shadingColor || '#e2e8f0'}
           boardFontWeight={puzzle.boardFontWeight || 'normal'}
           boardFontFamily={puzzle.boardFontFamily || ''}
-          autoSave={autoSave}
+          cloudAutoSave={cloudAutoSave}
           onClose={() => setShowSettingsDialog(false)}
           onSetShadingColor={setShadingColor}
           onSetFontWeight={setBoardFontWeight}
           onSetFontFamily={setBoardFontFamily}
-          onSetAutoSave={setAutoSave}
+          onSetCloudAutoSave={setCloudAutoSave}
           version="0.0.1"
         />
       )}
