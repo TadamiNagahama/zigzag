@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { X, BookOpen, Edit3, CheckCircle, Layers, FileDown } from 'lucide-react';
+import { X, BookOpen, Edit3, CheckCircle, Layers, FileDown, Lock, Database, Mail } from 'lucide-react';
 
 interface HelpDialogProps {
   onClose: () => void;
 }
 
 export const HelpDialog: React.FC<HelpDialogProps> = ({ onClose }) => {
-  const [activeTab, setActiveTab] = useState<'intro' | 'edit' | 'answer' | 'genres' | 'export'>('intro');
+  const [activeTab, setActiveTab] = useState<'intro' | 'edit' | 'answer' | 'genres' | 'export' | 'contact'>('intro');
 
   const tabs = [
     { id: 'intro', label: 'はじめに', icon: <BookOpen size={18} /> },
@@ -14,6 +14,7 @@ export const HelpDialog: React.FC<HelpDialogProps> = ({ onClose }) => {
     { id: 'answer', label: '解答作成', icon: <CheckCircle size={18} /> },
     { id: 'genres', label: '特殊ジャンル', icon: <Layers size={18} /> },
     { id: 'export', label: 'Excel出力', icon: <FileDown size={18} /> },
+    { id: 'contact', label: 'お問い合わせ他', icon: <FileDown size={18} /> },
   ] as const;
 
   const renderContent = () => {
@@ -126,6 +127,50 @@ export const HelpDialog: React.FC<HelpDialogProps> = ({ onClose }) => {
 
             <div className="help-tip">
               <p><strong>ヒント</strong>: 解答面では、自動的にアルファベットのマスが15%グレーで着色され、解答文字が14ptの大きさで見やすく配置されます。</p>
+            </div>
+          </div>
+        );
+      case 'contact':
+        return (
+          <div className="help-content animate-fade-in">
+            <h3>お問い合わせ他</h3>
+            <div className="help-section">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginBottom: '24px' }}>
+                <section style={{ display: 'flex', gap: '12px' }}>
+                  <Lock size={20} style={{ color: '#059669', flexShrink: 0, marginTop: '4px' }} />
+                  <div>
+                    <strong style={{ display: 'block', color: '#059669', marginBottom: '4px' }}>パスワードについて</strong>
+                    Googleの認証システムを使用しているため、作成者（キンピラ工房）がログインパスワードを知ることは技術的に不可能です。安心してお使いください。
+                  </div>
+                </section>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginBottom: '24px' }}>
+                <section style={{ display: 'flex', gap: '12px' }}>
+                  <Database size={20} style={{ color: '#0284c7', flexShrink: 0, marginTop: '4px' }} />
+                  <div>
+                    <strong style={{ display: 'block', color: '#0284c7', marginBottom: '4px' }}>データの秘匿性について</strong>
+                    保存されたパズルデータは皆様個人のものであり、作成者（キンピラ工房）が無断で内容を閲覧・分析することはありません。
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '4px', background: '#f8fafc', padding: '8px', borderRadius: '4px', borderLeft: '3px solid #cbd5e1' }}>
+                      ※ただし、アプリの不具合修正のためにデータを分析する必要が生じた場合は、必ず事前に該当するデータの権利者様へ個別に許可をいただいた上で対応いたします。
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+            <div className="help-section">
+              <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+                <Mail size={20} style={{ color: '#6366f1', flexShrink: 0, marginTop: '4px' }} />
+                <div>
+                  <strong style={{ display: 'block', color: '#6366f1', marginBottom: '4px' }}>お問い合わせ</strong>
+                  <p style={{ margin: '0 0 8px 0' }}>ご不明な点や不具合がございましたら、下記までご連絡ください。</p>
+                  <div style={{ background: 'var(--primary-light)', padding: '10px', borderRadius: '8px', display: 'inline-block' }}>
+                    キンピラ工房（長浜忠実）<br />
+                    <a href="mailto:zigzag@kimpirakobo.com" style={{ color: 'var(--primary-color)', fontWeight: 'bold', textDecoration: 'none' }}>
+                      zigzag@kimpirakobo.com
+                    </a>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         );

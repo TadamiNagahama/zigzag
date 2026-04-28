@@ -97,6 +97,21 @@ const recomputeNumbersWithDirections = (cells: Cell[][], currentWordList: Record
   return recomputeNumbers(cells, currentWordList, currentWordDirections, currentWordStarList);
 };
 
+const getInitialPuzzle = (w: number, h: number): PuzzleData => {
+  const savedSetting = localStorage.getItem('zigzag_autosave_setting');
+  if (savedSetting !== 'false') {
+    const savedData = localStorage.getItem('zigzag_autosave_data');
+    if (savedData) {
+      try {
+        return JSON.parse(savedData);
+      } catch (e) {
+        console.error('Failed to parse autosave data:', e);
+      }
+    }
+  }
+  return createEmptyPuzzle(w, h);
+};
+
 export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
   const {
     state: puzzle,
@@ -107,7 +122,7 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
     redo,
     canUndo,
     canRedo
-  } = useUndoRedo<PuzzleData>(createEmptyPuzzle(initialWidth, initialHeight));
+  } = useUndoRedo<PuzzleData>(getInitialPuzzle(initialWidth, initialHeight));
 
   // 盤面サイズの変更
   const resizeBoard = useCallback((h: number, w: number) => {

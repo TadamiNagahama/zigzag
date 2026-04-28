@@ -25,17 +25,19 @@ export const AnswerArea: React.FC<AnswerAreaProps> = ({
       style={{ 
         display: 'flex', 
         alignItems: 'center', 
-        gap: '32px',
+        gap: '16px',
         justifyContent: 'center',
-        width: '100%'
+        width: '100%',
+        flexWrap: 'wrap',
+        padding: '8px'
       }}
     >
       <div 
         className="answer-area" 
         style={{ 
           display: 'flex', 
-          gap: '24px', 
-          padding: '12px 0',
+          gap: '12px', 
+          padding: '8px 0',
           alignItems: 'center',
           justifyContent: 'center',
           flexWrap: 'wrap'
@@ -52,58 +54,62 @@ export const AnswerArea: React.FC<AnswerAreaProps> = ({
               border: '1px solid var(--border-color)'
             }}
           >
-            {group.map((char, cIdx) => (
-              <div 
-                key={char}
-                style={{ 
-                  width: cellSize, 
-                  height: cellSize, 
-                  backgroundColor: 'white', 
-                  borderRight: cIdx === group.length - 1 ? 'none' : '1px solid var(--border-color)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  position: 'relative',
-                }}
-              >
-                <span style={{ 
-                  position: 'absolute', 
-                  top: '2px', 
-                  left: '2px', 
-                  fontSize: `${cellSize * 0.25}px`, 
-                  color: 'var(--text-muted)',
-                  fontWeight: 'bold',
-                  lineHeight: 1
-                }}>
-                  {char}
-                </span>
-                {charMap[char] && (
-                  <div style={{
-                    fontSize: `${cellSize * 0.5}px`,
-                    color: 'var(--primary-color)',
+            {group.map((char, cIdx) => {
+              // スマホではサイズを少し小さくする (40px -> 32px 程度)
+              const displayCellSize = typeof window !== 'undefined' && window.innerWidth < 768 ? 32 : cellSize;
+              return (
+                <div 
+                  key={char}
+                  style={{ 
+                    width: displayCellSize, 
+                    height: displayCellSize, 
+                    backgroundColor: 'white', 
+                    borderRight: cIdx === group.length - 1 ? 'none' : '1px solid var(--border-color)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    position: 'relative',
+                  }}
+                >
+                  <span style={{ 
+                    position: 'absolute', 
+                    top: '1px', 
+                    left: '1px', 
+                    fontSize: `${displayCellSize * 0.25}px`, 
+                    color: 'var(--text-muted)',
                     fontWeight: 'bold',
+                    lineHeight: 1
                   }}>
-                    {charMap[char]}
-                  </div>
-                )}
-              </div>
-            ))}
+                    {char}
+                  </span>
+                  {charMap[char] && (
+                    <div style={{
+                      fontSize: `${displayCellSize * 0.6}px`,
+                      color: 'var(--primary-color)',
+                      fontWeight: 'bold',
+                    }}>
+                      {charMap[char]}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         ))}
       </div>
 
       {isRemainingAnswer && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontWeight: 'bold', color: 'var(--primary-color)', fontSize: '0.9rem' }}>残るもの</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', justifyContent: 'center' }}>
+          <span style={{ fontWeight: 'bold', color: 'var(--primary-color)', fontSize: '0.8rem' }}>残るもの</span>
           <div style={{ position: 'relative' }}>
             <select
               value={remainingAnswerWord}
               onChange={(e) => onSelectRemaining?.(e.target.value)}
               style={{
-                width: cellSize * 5,
-                height: cellSize,
-                padding: '0 12px',
-                fontSize: '1rem',
+                minWidth: '120px',
+                height: '36px',
+                padding: '0 24px 0 8px',
+                fontSize: '0.9rem',
                 border: '2px solid var(--primary-color)',
                 borderRadius: '6px',
                 appearance: 'none',
@@ -120,17 +126,24 @@ export const AnswerArea: React.FC<AnswerAreaProps> = ({
             </select>
             <div style={{
               position: 'absolute',
-              right: '12px',
+              right: '8px',
               top: '50%',
               transform: 'translateY(-50%)',
               pointerEvents: 'none',
-              color: 'var(--primary-color)'
+              color: 'var(--primary-color)',
+              fontSize: '0.7rem'
             }}>
               ▼
             </div>
           </div>
         </div>
       )}
+      <style dangerouslySetInnerHTML={{ __html: `
+        @media (max-width: 768px) {
+          .answer-area-wrapper { gap: 8px !important; }
+          .answer-area { gap: 8px !important; }
+        }
+      `}} />
     </div>
   );
 };

@@ -151,7 +151,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ initialOptions, hasS
 
   return (
     <div className="modal-overlay" style={{ zIndex: 3000 }}>
-      <div className="modal-content glass card" style={{ width: '500px', padding: '24px', maxHeight: '90vh', overflowY: 'auto' }}>
+      <div className="modal-content glass card" style={{ padding: '24px', maxHeight: '90vh', overflowY: 'auto' }}>
         <h3 style={{ marginBottom: '20px', borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }}>Excel出力設定</h3>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -185,7 +185,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ initialOptions, hasS
             <h4 style={{ fontSize: '0.9rem', color: 'var(--primary-color)', marginBottom: '10px' }}>【1マスのセル数とサイズ】</h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', paddingLeft: '10px' }}>
               {/* モード選択 */}
-              <div style={{ display: 'flex', gap: '15px' }}>
+              <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap' }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '0.85rem' }}>
                   <input type="radio" name="boardMode" checked={options.boardCellMode === '1x1'} onChange={() => setOptions({ ...options, boardCellMode: '1x1', cellWidth: 48, cellHeight1: 48 })} />
                   1マス＝1セル
@@ -219,24 +219,24 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ initialOptions, hasS
 
               {/* サイズ指定 & プレビュー */}
               <div style={{ background: 'var(--bg-secondary)', padding: '15px', borderRadius: '12px', marginTop: '5px' }}>
-                <div style={{ display: 'flex', gap: '40px', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ display: 'flex', gap: '20px', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' }}>
                   {/* 数値入力エリア */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', minWidth: '180px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <span style={{ fontSize: '0.85rem', fontWeight: 'bold', width: '80px', textAlign: 'right' }}>幅:</span>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 'bold', width: '60px', textAlign: 'right' }}>幅:</span>
                       <input type="number" step="1" className="input-field" style={{ width: '55px', textAlign: 'center' }} value={options.cellWidth} onChange={e => setOptions({ ...options, cellWidth: parseFloat(e.target.value) || 0 })} />
                       <span style={{ fontSize: '0.85rem', width: '20px' }}>px</span>
                       <span style={{ fontSize: '0.75rem', color: 'var(--primary-color)', minWidth: '80px' }}>Excel: {((options.cellWidth - 5) / 8).toFixed(2)}</span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <span style={{ fontSize: '0.85rem', fontWeight: 'bold', width: '80px', textAlign: 'right' }}>{options.boardCellMode === '2x1' ? '高さ(上):' : '高さ:'}</span>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 'bold', width: '60px', textAlign: 'right' }}>{options.boardCellMode === '2x1' ? '高さ(上):' : '高さ:'}</span>
                       <input type="number" step="1" className="input-field" style={{ width: '55px', textAlign: 'center' }} value={options.cellHeight1} onChange={e => setOptions({ ...options, cellHeight1: parseFloat(e.target.value) || 0 })} />
                       <span style={{ fontSize: '0.85rem', width: '20px' }}>px</span>
                       <span style={{ fontSize: '0.75rem', color: 'var(--primary-color)', minWidth: '80px' }}>Excel: {(options.cellHeight1 * 0.75).toFixed(1)}pt</span>
                     </div>
                     {options.boardCellMode === '2x1' && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <span style={{ fontSize: '0.85rem', fontWeight: 'bold', width: '80px', textAlign: 'right' }}>高さ(下):</span>
+                        <span style={{ fontSize: '0.85rem', fontWeight: 'bold', width: '60px', textAlign: 'right' }}>高さ(下):</span>
                         <input type="number" step="1" className="input-field" style={{ width: '55px', textAlign: 'center' }} value={options.cellHeight2} onChange={e => setOptions({ ...options, cellHeight2: parseFloat(e.target.value) || 0 })} />
                         <span style={{ fontSize: '0.85rem', width: '20px' }}>px</span>
                         <span style={{ fontSize: '0.75rem', color: 'var(--primary-color)', minWidth: '80px' }}>Excel: {(options.cellHeight2 * 0.75).toFixed(1)}pt</span>
@@ -354,11 +354,11 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ initialOptions, hasS
             <h4 style={{ fontSize: '0.9rem', color: 'var(--primary-color)', marginBottom: '10px' }}>【フォント】</h4>
             <div style={{ paddingLeft: '10px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.85rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                   <span>フォント名:</span>
                   <select
                     className="input-field"
-                    style={{ flex: 1, padding: '4px' }}
+                    style={{ flex: '1 1 200px', padding: '4px', minWidth: '0' }}
                     value={options.fontName}
                     onChange={e => setOptions({ ...options, fontName: e.target.value })}
                   >
@@ -378,7 +378,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ initialOptions, hasS
                   {localFonts.length === 0 && (
                     <button
                       className="btn-secondary"
-                      style={{ fontSize: '0.7rem', padding: '4px 8px', whiteSpace: 'nowrap' }}
+                      style={{ fontSize: '0.7rem', padding: '4px 8px', whiteSpace: 'nowrap', flex: '0 0 auto' }}
                       onClick={handleGetFonts}
                       disabled={isLoadingFonts}
                     >
@@ -388,12 +388,12 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ initialOptions, hasS
                 </div>
                 
                 {localFonts.length === 0 && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>※リストにない場合は直接入力も可:</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>※直接入力可:</span>
                     <input
                       type="text"
                       className="input-field"
-                      style={{ flex: 1, padding: '2px 8px', fontSize: '0.8rem' }}
+                      style={{ flex: '1 1 150px', padding: '2px 8px', fontSize: '0.8rem', minWidth: '0' }}
                       value={options.fontName}
                       onChange={e => setOptions({ ...options, fontName: e.target.value })}
                       placeholder="フォント名を正確に入力"
@@ -401,14 +401,14 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ initialOptions, hasS
                   </div>
                 )}
               </div>
-              <div style={{ display: 'flex', gap: '15px', fontSize: '0.85rem', alignItems: 'center' }}>
-                <label>
+              <div style={{ display: 'flex', gap: '10px', fontSize: '0.85rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                <label style={{ whiteSpace: 'nowrap' }}>
                   数字/英字: <input type="number" className="input-field" style={{ width: '45px', padding: '2px' }} value={options.fontSizeSmall} onChange={e => setOptions({ ...options, fontSizeSmall: parseInt(e.target.value) || 10 })} /> pt
                 </label>
-                <label>
+                <label style={{ whiteSpace: 'nowrap' }}>
                   漢字: <input type="number" className="input-field" style={{ width: '45px', padding: '2px' }} value={options.fontSizeLarge} onChange={e => setOptions({ ...options, fontSizeLarge: parseInt(e.target.value) || 14 })} /> pt
                 </label>
-                <label>
+                <label style={{ whiteSpace: 'nowrap' }}>
                   リスト: <input type="number" className="input-field" style={{ width: '45px', padding: '2px' }} value={options.listFontSize} onChange={e => setOptions({ ...options, listFontSize: parseInt(e.target.value) || 11 })} /> pt
                 </label>
               </div>

@@ -117,28 +117,282 @@ button:disabled {
 }
 
 .header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.75rem 2rem;
-  z-index: 10;
+  padding: 8px 16px;
+  z-index: 1000;
+  background: var(--glass-bg);
+  backdrop-filter: blur(8px);
   margin: 0.5rem 0.5rem 0 0.5rem;
   border-radius: 12px;
+  border: 1px solid var(--border-color);
+  position: sticky;
+  top: 8px;
+}
+
+.header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 1600px;
+  margin: 0 auto;
+  gap: 16px;
+}
+
+.header-title-area {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   flex-shrink: 0;
 }
 
 .title {
-  font-size: 1.1rem;
+  font-size: 1.15rem;
   font-weight: 700;
   margin: 0;
   background: linear-gradient(to right, var(--primary-color), var(--accent-color));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
+  white-space: nowrap;
 }
 
-.button-group {
+.header-menu {
   display: flex;
-  gap: 0.5rem;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.menu-group {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.menu-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.excel-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.user-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+}
+
+.excel-btn {
+  background-color: #10b981 !important;
+  border-color: #059669 !important;
+}
+
+.excel-btn:hover {
+  background-color: #059669 !important;
+}
+
+.mobile-nav {
+  display: none;
+}
+
+/* スマホ版でのスクロールバー範囲制限 */
+@media (max-width: 768px) {
+  html, body {
+    overflow: hidden;
+    height: 100%;
+    position: fixed;
+    width: 100%;
+  }
+}
+
+@media (max-width: 768px) {
+  /* 下部ナビゲーションの刷新 */
+  .mobile-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    z-index: 1000;
+    display: grid;
+    grid-template-columns: 2.2fr 0.9fr 0.9fr; /* 盤面を少し広く調整 */
+    background: var(--glass-bg);
+    backdrop-filter: blur(12px);
+    border-top: 1px solid var(--border-color);
+    height: 70px;
+    padding: 6px;
+    gap: 6px;
+  }
+
+  .nav-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: rgba(0,0,0,0.1); /* グレーを濃く */
+    border-radius: 8px;
+    padding: 2px;
+  }
+
+  .nav-group-label {
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    font-weight: bold;
+    margin-bottom: 2px;
+  }
+
+  .nav-buttons {
+    display: flex;
+    width: 100%;
+    gap: 2px;
+    height: 100%;
+  }
+
+  .mobile-nav-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    border-radius: 6px;
+    color: var(--text-muted);
+    gap: 2px;
+    padding: 4px 0;
+  }
+
+  .mobile-nav-btn span {
+    font-size: 0.6rem;
+    white-space: nowrap;
+  }
+
+  .mobile-nav-btn.active {
+    background: var(--primary-color);
+    color: white;
+    font-weight: bold;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  }
+
+  .mobile-nav-btn:hover:not(.active) {
+    background: rgba(99, 102, 241, 0.1); /* 青を半分くらいの薄さに */
+  }
+
+  /* 盤面内のモードボタン用 */
+  .mode-btn {
+    font-size: 0.55rem !important;
+    padding: 2px 0 !important;
+  }
+
+  .header {
+    padding: 6px 8px;
+    margin: 0;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+    top: 0;
+  }
+
+  .header-inner {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .header-title-area {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .title {
+    font-size: 1rem;
+    -webkit-text-fill-color: var(--primary-color); /* スマホではシンプルに */
+  }
+
+  .header-icon {
+    display: none;
+  }
+
+  .header-menu {
+    width: 100%;
+    gap: 1px;
+    padding: 0;
+    justify-content: space-between;
+  }
+
+  .menu-group {
+    gap: 1px;
+  }
+
+  /* 比率指定 */
+  .undo-redo { width: 20%; }
+  .auth-group { 
+    width: 30%; 
+    padding: 0 5%; /* 左右に少し余白を入れてボタンを中央寄りに */
+    box-sizing: border-box;
+  }
+  .action-group { width: 50%; }
+
+  .undo-btn, .redo-btn { width: 50%; }
+  .login-btn, .logout-btn { 
+    width: 100%; 
+    height: 100%;
+    margin: 0 auto;
+    border-radius: 6px;
+  }
+  .new-btn { width: 28%; }
+  .load-btn { width: 28%; }
+  .save-btn { width: 28%; }
+  .excel-btn { width: 16%; }
+
+  .excel-word-pc {
+    display: none; /* スマホでは「Excel」を隠す */
+  }
+
+  .menu-btn {
+    padding: 4px 1px;
+    flex-direction: column;
+    gap: 1px;
+    font-size: 0.6rem;
+    justify-content: center;
+    border-radius: 4px;
+    height: 100%;
+  }
+
+  /* ログインボタン等は常に横並びにする指示に対応 */
+  .login-btn, .logout-btn {
+    flex-direction: row !important;
+    font-size: 0.7rem !important;
+    gap: 4px !important;
+  }
+
+  .menu-btn svg, .excel-icon {
+    width: 14px;
+    height: 14px;
+  }
+
+  .btn-text {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: clip;
+    font-size: 0.55rem;
+  }
+
+  .help-icon-wrapper {
+    position: absolute;
+    right: 12px;
+    top: 8px;
+    padding: 0 !important;
+    z-index: 1100; /* 最前面に */
+  }
+}
+
+#board-content-wrapper {
+  transform-origin: top center !important;
 }
 
 .content-area {
@@ -342,6 +596,149 @@ button:disabled {
   gap: 12px;
   margin-top: 24px;
 }
+/* Responsive Styles */
+@media (max-width: 768px) {
+  .header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    z-index: 1000;
+    padding: 0.5rem 1rem;
+    margin: 0;
+    border-radius: 0;
+    height: 60px;
+  }
+
+  .layout-container {
+    padding-top: 60px; /* ヘッダー固定用 */
+    padding-bottom: 70px; /* フッター固定用 */
+  }
+
+  .title {
+    font-size: 1rem;
+  }
+
+  .content-area {
+    flex-direction: column;
+    padding: 0;
+    gap: 0;
+  }
+
+  .sidebar {
+    width: 100%;
+    height: auto;
+    max-height: 45vh;
+    border-radius: 0;
+    box-shadow: none;
+    border: none;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  /* 盤面が左に切れないための修正 */
+  #board-scroll-area {
+    display: block !important; /* flexからblockへ変更してスクロールを正常化 */
+    overflow: auto;
+    width: 100%;
+    height: 100%;
+  }
+
+  #board-content-wrapper {
+    display: inline-block !important; /* inline-blockにすることで内容量に合わせる */
+    min-width: 100%;
+    transform-origin: top left !important; /* 左上起点にすることで左切れ防止 */
+    text-align: center;
+  }
+
+  .hide-on-mobile {
+    display: none !important;
+  }
+
+  .main-board {
+    border-radius: 0;
+    padding: 10px !important; /* 盤面の右・下余白を小さく */
+  }
+
+  .button-group {
+    gap: 8px;
+    padding: 4px 0;
+  }
+
+  .btn-text {
+    display: inline !important; /* 文言を常に表示 */
+  }
+
+  .modal-content {
+    width: 95vw;
+    margin: 10px;
+    padding: 16px;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+
+  .context-menu {
+    position: fixed !important;
+    top: auto !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100vw !important;
+    max-width: none !important;
+    border-radius: 20px 20px 0 0 !important;
+    padding: 12px 16px 24px 16px !important;
+    box-shadow: 0 -10px 25px rgba(0,0,0,0.1) !important;
+    animation: slide-up 0.3s ease-out !important;
+    display: grid !important;
+    grid-template-columns: repeat(6, 1fr) !important; /* 6列に増やして高さを抑える */
+    gap: 6px !important;
+    max-height: 50vh !important; /* 画面の半分までに制限 */
+    overflow-y: auto !important;
+    z-index: 2000 !important;
+  }
+
+  .context-menu-item {
+    aspect-ratio: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem !important; /* 少し小さく */
+    padding: 4px !important;
+  }
+
+  .context-menu-label {
+    grid-column: span 6;
+    text-align: center;
+    margin-bottom: 8px;
+    font-size: 0.75rem !important;
+  }
+
+  .context-menu-action {
+    grid-column: span 6;
+    text-align: center;
+    padding: 12px !important;
+    margin-top: 8px;
+    background: #fee2e2 !important;
+    color: #ef4444 !important;
+    border-radius: 10px;
+    font-size: 0.9rem !important;
+  }
+
+  @keyframes slide-up {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+  }
+
+  .radio-group {
+    grid-template-columns: 1fr;
+  }
+}
+
+.radio-group {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
 @keyframes pop-in {
   0% { opacity: 0; transform: translateX(-50%) scale(0.9); }
   100% { opacity: 1; transform: translateX(-50%) scale(1); }

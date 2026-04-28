@@ -6,16 +6,7 @@ import type { ExportOptions } from '../components/ExportDialog';
 const pxToPoints = (px: number) => px * 0.75;
 const pxToChars = (px: number) => Math.max(0, (px - 5) / 8); // ピクセル数からExcelの列幅（文字数）への変換精度を修正。
 
-// ウェブのフォントファミリーをExcel用のフォント名に変換
-const getExcelFontName = (family?: string) => {
-  if (!family) return 'MS Pゴシック';
-  const f = family.toLowerCase();
-  if (f.includes('mincho')) return 'MS 明朝';
-  if (f.includes('meiryo')) return 'メイリオ';
-  if (f.includes('gothic')) return 'MS Pゴシック';
-  if (f === 'serif') return 'MS 明朝';
-  return 'MS Pゴシック';
-};
+
 
 /**
  * 指定されたワークシートにパズルの一式を描画する内部関数

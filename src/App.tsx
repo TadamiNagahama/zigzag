@@ -87,8 +87,31 @@ function App() {
   const [showTagDialog, setShowTagDialog] = useState(false);
   const [showHelpDialog, setShowHelpDialog] = useState(false);
   const [showWelcomeDialog, setShowWelcomeDialog] = useState(false);
+  const [activeMobileTab, setActiveMobileTab] = useState<'board' | 'list'>('board');
   const [exportSettings, setExportSettings] = useState<Partial<ExportOptions>>({});
   const [confirmAction, setConfirmAction] = useState<{ message: string | React.ReactNode, onConfirm: () => void, isDestructive?: boolean } | null>(null);
+  const [showMobileSettingsMenu, setShowMobileSettingsMenu] = useState(false);
+
+  // オートセーブの設定（デフォルトON）
+  const [autoSave, setAutoSave] = useState(() => {
+    const saved = localStorage.getItem('zigzag_autosave_setting');
+    return saved !== 'false';
+  });
+
+  // パズル状態が変わるたびに自動保存
+  useEffect(() => {
+    if (autoSave) {
+      localStorage.setItem('zigzag_autosave_data', JSON.stringify(puzzle));
+    }
+  }, [puzzle, autoSave]);
+
+  // 設定変更時の処理
+  useEffect(() => {
+    localStorage.setItem('zigzag_autosave_setting', autoSave.toString());
+    if (!autoSave) {
+      localStorage.removeItem('zigzag_autosave_data'); // OFFにしたら保存データを消す
+    }
+  }, [autoSave]);
 
   useEffect(() => {
     // 初回訪問（承諾済みでない）ならダイアログを表示
@@ -779,54 +802,29 @@ function App() {
       const content = document.getElementById('board-content-wrapper');
       if (!scrollArea || !content) return;
 
-      // 10x10, 13x13, 15x15 のサイズは現状で「ぴったり」のため、計算ロジックの極端な変更に注意
-      // すでにmain-boardのpadding(20px/10px)で余白が確保されているため、ここでは引き算しない
-      const availW = scrollArea.clientWidth;
-      const availH = scrollArea.clientHeight;
-
-      // contentのscrollWidth/Heightはズームに依存しない「自然な」サイズを返す
-      const naturalW = content.scrollWidth;
-      const naturalH = content.scrollHeight;
+      const availW = scrollArea.clientWidth - 40;
+      const availH = scrollArea.clientHeight - 40;
+      
+      const rect = content.getBoundingClientRect();
+      const naturalW = rect.width / zoom; 
+      const naturalH = rect.height / zoom;
 
       if (naturalW > 0 && naturalH > 0) {
         const scaleW = availW / naturalW;
         const scaleH = availH / naturalH;
         const targetScale = Math.min(scaleW, scaleH);
-        const newZoom = Math.min(3.0, Math.max(0.4, targetScale));
+        const newZoom = Math.min(2.0, Math.max(0.2, targetScale));
         setZoom(newZoom);
       }
-    }, 300);
+    }, 100);
   };
 
-  const handleResizeRequest = (newH: number, newW: number) => {
-    let hasLoss = false;
-    for (let y = 0; y < puzzle.height; y++) {
-      for (let x = 0; x < puzzle.width; x++) {
-        const cell = puzzle.cells[y][x];
-        if (x >= newW || y >= newH) {
-          if (cell.isNumbered || cell.answerKey || cell.mergedSize || cell.mergedParent) {
-            hasLoss = true;
-            break;
-          }
-        } else if (cell.mergedSize) {
-          const { width: mw, height: mh } = cell.mergedSize;
-          if (x + mw > newW || y + mh > newH) {
-            hasLoss = true;
-            break;
-          }
-        }
-      }
-      if (hasLoss) break;
-    }
-
-    if (hasLoss) {
-      setPendingResize({ h: newH, w: newW });
-    } else {
-      resizeBoard(newH, newW);
-      fitToScreen();
-      setShowSettingsDialog(false);
-    }
-  };
+  // タブ切り替え時や画面サイズ変更時に自動フィット
+  useEffect(() => {
+    fitToScreen();
+    window.addEventListener('resize', fitToScreen);
+    return () => window.removeEventListener('resize', fitToScreen);
+  }, [activeMobileTab]);
 
   const handleConfirmResize = () => {
     if (pendingResize) {
@@ -923,12 +921,19 @@ function App() {
 
 
   return (
-    <Layout
+    <Layout 
       onExport={handleExport}
       onNew={handleNew}
       onSave={handleSave}
       onLoad={handleLoad}
       onHelp={() => setShowHelpDialog(true)}
+      onSettings={() => {
+          if (window.innerWidth < 768) {
+            setShowMobileSettingsMenu(true);
+          } else {
+            setShowSettingsDialog(true);
+          }
+        }}
       undo={undo}
       redo={redo}
       canUndo={canUndo}
@@ -936,6 +941,10 @@ function App() {
       user={user}
       onLogin={handleLogin}
       onLogout={handleLogout}
+      activeTab={activeMobileTab}
+      onTabChange={setActiveMobileTab}
+      appMode={appMode}
+      onModeChange={setAppMode}
     >
       <div style={{ display: 'flex', flex: 1, height: 'calc(100vh - 80px)', overflow: 'hidden' }}>
         <input
@@ -948,11 +957,11 @@ function App() {
           onKeyDown={handleKeyDown}
           style={{ position: 'fixed', opacity: 0, pointerEvents: 'none', top: 0, left: 0 }}
         />
-        <aside className="sidebar shadow">
+        <aside className={`sidebar shadow ${window.innerWidth < 768 && activeMobileTab === 'board' ? 'hide-on-mobile' : ''}`}>
           <div className="sidebar-content" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', padding: 0 }}>
             {/* 固定ヘッダー部分 */}
             <section style={{ padding: '16px 16px 0px 16px', flexShrink: 0 }}>
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+              <div className="hide-on-mobile" style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
                 <button
                   className={appMode === 'shade' ? 'btn-primary' : 'btn-secondary'}
                   onClick={() => setAppMode('shade')}
@@ -999,7 +1008,7 @@ function App() {
                 </select>
               </div>
 
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '16px' }}>
+              <div className="hide-on-mobile" style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '16px' }}>
                 <button
                   className="btn-secondary"
                   style={{ padding: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
@@ -1203,7 +1212,7 @@ function App() {
             </section>
 
             {/* 固定フッター部分 */}
-            <section style={{ padding: '8px 16px 16px 16px', borderTop: '1px solid var(--border-color)', flexShrink: 0 }}>
+            <section className="hide-on-mobile" style={{ padding: '8px 16px 16px 16px', borderTop: '1px solid var(--border-color)', flexShrink: 0 }}>
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
                   <button className="btn-secondary" style={{ padding: '6px' }} onClick={() => setZoom(z => Math.max(0.5, z - 0.1))} title="縮小">
@@ -1236,7 +1245,7 @@ function App() {
         </aside>
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
-          <section className="main-board glass" style={{
+          <section className={`main-board glass ${window.innerWidth < 768 && activeMobileTab === 'list' ? 'hide-on-mobile' : ''}`} style={{
             flex: 1,
             padding: '10px 20px 0px 20px',
             display: 'flex',
@@ -1261,6 +1270,8 @@ function App() {
               <div id="board-content-wrapper" style={{
                 transform: `scale(${zoom})`,
                 transformOrigin: 'top center',
+                transition: 'transform 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                padding: window.innerWidth < 768 ? '20px' : '20px',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
@@ -1327,7 +1338,11 @@ function App() {
             gap: '8px',
             backgroundColor: '#f1f5f9',
             flexShrink: 0,
-            minHeight: '32px'
+            minHeight: '32px',
+            position: window.innerWidth < 768 ? 'fixed' : 'relative',
+            bottom: window.innerWidth < 768 ? '70px' : 'auto',
+            left: 0,
+            zIndex: 900
           }}>
             <button
               onClick={() => setShowTagDialog(true)}
@@ -1432,10 +1447,12 @@ function App() {
           shadingColor={puzzle.shadingColor || '#e2e8f0'}
           boardFontWeight={puzzle.boardFontWeight || 'normal'}
           boardFontFamily={puzzle.boardFontFamily || ''}
+          autoSave={autoSave}
           onClose={() => setShowSettingsDialog(false)}
           onSetShadingColor={setShadingColor}
           onSetFontWeight={setBoardFontWeight}
           onSetFontFamily={setBoardFontFamily}
+          onSetAutoSave={setAutoSave}
           version="0.0.1"
         />
       )}
@@ -1555,6 +1572,43 @@ function App() {
             setShowWelcomeDialog(false);
           }} 
         />
+      )}
+      {/* スマホ用設定メニュー */}
+      {showMobileSettingsMenu && (
+        <div className="modal-overlay" onClick={() => setShowMobileSettingsMenu(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ width: '80%', padding: '20px' }}>
+            <h3 style={{ marginBottom: '20px', textAlign: 'center' }}>設定メニュー</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <button 
+                className="btn-primary" 
+                style={{ padding: '16px', fontSize: '1rem' }}
+                onClick={() => {
+                  setShowMobileSettingsMenu(false);
+                  setShowSizeDialog(true);
+                }}
+              >
+                サイズ変更
+              </button>
+              <button 
+                className="btn-secondary" 
+                style={{ padding: '16px', fontSize: '1rem' }}
+                onClick={() => {
+                  setShowMobileSettingsMenu(false);
+                  setShowSettingsDialog(true);
+                }}
+              >
+                詳細設定
+              </button>
+              <button 
+                className="btn-secondary" 
+                style={{ marginTop: '10px', padding: '12px', border: 'none', color: 'var(--text-muted)' }}
+                onClick={() => setShowMobileSettingsMenu(false)}
+              >
+                キャンセル
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </Layout>
   )

@@ -37,7 +37,7 @@ export const SizeDialog: React.FC<SizeDialogProps> = ({ currentWidth, currentHei
 
   return (
     <div className="modal-overlay">
-      <div className="modal-content glass card" style={{ width: '400px', padding: '24px' }}>
+      <div className="modal-content glass card" style={{ padding: '24px' }}>
         <header style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1.5rem', alignItems: 'center' }}>
           <h2 style={{ margin: 0, fontSize: '1.2rem' }}>盤面サイズの変更</h2>
           <button onClick={onClose} className="btn-secondary" style={{ padding: '6px', border: 'none', borderRadius: '50%', display: 'flex' }}>
@@ -45,7 +45,7 @@ export const SizeDialog: React.FC<SizeDialogProps> = ({ currentWidth, currentHei
           </button>
         </header>
 
-        <div className="radio-group" style={{ marginBottom: '12px', display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
+        <div className="radio-group" style={{ marginBottom: '12px', display: 'grid', gap: '12px' }}>
           {PRESETS.map(p => (
             <div 
               key={`${p.h}x${p.w}`}
