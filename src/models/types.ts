@@ -20,7 +20,7 @@ export interface Cell {
   mergedSize?: { width: number, height: number }; // 結合サイズ (親マスのみが保持する)
 }
 
-export type PuzzleType = 'ノーマル' | 'Wリスト' | 'Wリスト★' | 'ナンバーレス' | '部分ナンバーレス' | 'ウルトラ超' | '変則' | '矢印';
+export type PuzzleType = 'ノーマル' | 'Wリスト' | 'Wリスト★' | 'ナンバーレス' | '部分ナンバーレス' | 'ウルトラ' | '変則' | '矢印';
 
 export interface PuzzleData {
   id?: number; // Dexie用のプライマリキー
@@ -46,6 +46,7 @@ export interface PuzzleData {
   boardFontWeight?: 'normal' | 'bold'; // 盤面のフォントの太さ
   boardFontFamily?: string; // 盤面のフォント名
   tags?: string[]; // タグ一覧
+  customWordOrder?: number[]; // 単語リストの表示順序（番号の配列）
   updatedAt: number;
 }
 

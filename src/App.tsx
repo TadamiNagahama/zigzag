@@ -48,7 +48,10 @@ function App() {
     setPuzzleType,
     setAnswerKey,
     toggleShaded,
+    updateCellChar,
     updateCellAnswerChar,
+    reorderWordList,
+    sortWordListAlphabetically,
     addTag,
     removeTag,
     mergeCells,
@@ -62,6 +65,7 @@ function App() {
   } = usePuzzle(17, 17);
 
   const [editMode, setEditMode] = useState<EditMode>('number');
+  const [draggedItemIndex, setDraggedItemIndex] = useState<number | null>(null);
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
   const [showPrintDialog, setShowPrintDialog] = useState(false);
   const [printOptions, setPrintOptions] = useState<PrintOptions | null>(null);
@@ -385,7 +389,23 @@ function App() {
       if (editMode === 'wall') {
         toggleCellType(x, y);
       } else if (editMode === 'number') {
-        toggleNumberFlag(x, y);
+        if (puzzle.puzzleType === 'ナンバーレス') {
+          const cell = puzzle.cells[y][x];
+          if (!cell.isNumbered && !cell.char) {
+            // なし -> 数字
+            toggleNumberFlag(x, y);
+          } else if (cell.isNumbered) {
+            // 数字 -> 文字入力
+            toggleNumberFlag(x, y);
+            setFocusedCell({ x, y });
+          } else {
+            // 文字入力 -> なし (数字を振る)
+            toggleNumberFlag(x, y);
+            setFocusedCell(null);
+          }
+        } else {
+          toggleNumberFlag(x, y);
+        }
       }
     }
     setContextMenu(null);
@@ -506,26 +526,35 @@ function App() {
   }, [focusedCell, puzzle.width, puzzle.height, puzzle.cells]);
 
   useEffect(() => {
-    if (appMode === 'answer' && focusedCell && hiddenInputRef.current) {
+    if ((appMode === 'answer' || appMode === 'edit') && focusedCell && hiddenInputRef.current) {
       hiddenInputRef.current.focus();
     }
   }, [appMode, focusedCell]);
 
   const handleHiddenInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     // IME入力中は何もしない
-    if (appMode !== 'answer' || !focusedCell || isComposing) return;
+    if (isComposing || !focusedCell) return;
 
-    // 提示文字があるマスには入力させない
-    if (puzzle.cells[focusedCell.y][focusedCell.x].char) return;
-
+    const cell = puzzle.cells[focusedCell.y][focusedCell.x];
     const val = e.target.value;
-    if (val) {
-      // 解答文字（answerChar）を更新
-      const char = val.slice(-1);
-      updateCellAnswerChar(focusedCell.x, focusedCell.y, char);
-      handleAdvanceFocus();
-      // 入力値をクリア
-      e.target.value = '';
+
+    if (appMode === 'answer') {
+      // 提示文字があるマスには入力させない
+      if (cell.char) return;
+
+      if (val) {
+        const char = val.slice(-1);
+        updateCellAnswerChar(focusedCell.x, focusedCell.y, char);
+        handleAdvanceFocus();
+        e.target.value = '';
+      }
+    } else if (appMode === 'edit' && editMode === 'number') {
+      // ナンバーレスなどのヒント文字入力
+      if (val) {
+        const char = val.slice(-1);
+        updateCellChar(focusedCell.x, focusedCell.y, char);
+        e.target.value = '';
+      }
     }
   };
 
@@ -539,21 +568,22 @@ function App() {
     setIsComposing(false);
     setComposingText('');
 
-    if (appMode !== 'answer' || !focusedCell) return;
-
-    // 提示文字があるマスには入力させない
-    if (puzzle.cells[focusedCell.y][focusedCell.x].char) return;
-
-    // 確定された文字列を取得
-    // e.data が確実だが、ブラウザ互換性のために input.value も考慮
+    if (!focusedCell) return;
+    const cell = puzzle.cells[focusedCell.y][focusedCell.x];
     const val = e.data || (e.target as HTMLInputElement).value;
 
-    if (val) {
-      updateCellAnswerChar(focusedCell.x, focusedCell.y, val);
-      handleAdvanceFocus();
+    if (appMode === 'answer') {
+      if (cell.char) return;
+      if (val) {
+        updateCellAnswerChar(focusedCell.x, focusedCell.y, val);
+        handleAdvanceFocus();
+      }
+    } else if (appMode === 'edit' && editMode === 'number') {
+      if (val) {
+        updateCellChar(focusedCell.x, focusedCell.y, val);
+      }
     }
 
-    // 次の入力（直後のonChangeなど）で二重処理されないよう、確実にバッファを空にする
     if (hiddenInputRef.current) {
       hiddenInputRef.current.value = '';
     }
@@ -817,7 +847,7 @@ function App() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (appMode !== 'answer' || !focusedCell) return;
+    if ((appMode !== 'answer' && appMode !== 'edit') || !focusedCell) return;
 
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
       e.preventDefault();
@@ -829,17 +859,25 @@ function App() {
       setFocusedCell({ x, y });
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      handleAdvanceFocus();
-    } else if (e.key === 'Backspace') {
-      const cell = puzzle.cells[focusedCell.y][focusedCell.x];
-      const current = cell.answerChar || '';
-      if (current.length > 1) {
-        updateCellAnswerChar(focusedCell.x, focusedCell.y, current.slice(0, -1));
-      } else {
-        updateCellAnswerChar(focusedCell.x, focusedCell.y, '');
+      if (appMode === 'answer') handleAdvanceFocus();
+    } else if (e.key === 'Backspace' || e.key === 'Delete') {
+      if (appMode === 'answer') {
+        const cell = puzzle.cells[focusedCell.y][focusedCell.x];
+        const current = cell.answerChar || '';
+        if (e.key === 'Backspace' && current.length > 1) {
+          updateCellAnswerChar(focusedCell.x, focusedCell.y, current.slice(0, -1));
+        } else {
+          updateCellAnswerChar(focusedCell.x, focusedCell.y, '');
+        }
+      } else if (appMode === 'edit') {
+        const cell = puzzle.cells[focusedCell.y][focusedCell.x];
+        const current = cell.char || '';
+        if (e.key === 'Backspace' && current.length > 1) {
+          updateCellChar(focusedCell.x, focusedCell.y, current.slice(0, -1));
+        } else {
+          updateCellChar(focusedCell.x, focusedCell.y, '');
+        }
       }
-    } else if (e.key === 'Delete') {
-      updateCellAnswerChar(focusedCell.x, focusedCell.y, '');
     }
   };
 
@@ -1050,6 +1088,7 @@ function App() {
                   <option value="Wリスト★">Wリスト★</option>
                   <option value="ナンバーレス">ナンバーレス</option>
                   <option value="部分ナンバーレス">部分ナンバーレス</option>
+                  <option value="ウルトラ">ウルトラ</option>
                   <option value="変則">変則</option>
                   <option value="矢印">矢印</option>
                 </select>
@@ -1098,6 +1137,14 @@ function App() {
               <div style={{ padding: '0' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0' }}>
                   <h4 style={{ margin: 0, fontSize: '0.9rem', color: 'var(--primary-color)' }}>単語リスト</h4>
+                  <button
+                    className="btn-secondary"
+                    style={{ fontSize: '0.7rem', padding: '2px 6px' }}
+                    onClick={sortWordListAlphabetically}
+                    title="あいうえお順に並べ替え"
+                  >
+                    あいうえお順
+                  </button>
                 </div>
 
               </div>
@@ -1109,9 +1156,39 @@ function App() {
             <section style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', padding: '12px 16px' }}>
               <div style={{ fontSize: '0.8rem' }}>
                 <div className="word-list-grid" style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
-                  {numbers.map(num => (
-                    <div key={num} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span style={{ minWidth: '24px', fontWeight: 'bold', fontSize: '0.9rem' }}>{num}.</span>
+                  {(puzzle.customWordOrder || numbers).map((num, idx) => (
+                    <div
+                      key={num}
+                      draggable
+                      onDragStart={(e) => {
+                        setDraggedItemIndex(idx);
+                        e.dataTransfer.effectAllowed = 'move';
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        if (draggedItemIndex !== null && draggedItemIndex !== idx) {
+                          reorderWordList(draggedItemIndex, idx);
+                        }
+                        setDraggedItemIndex(null);
+                      }}
+                      style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: '6px',
+                        cursor: 'grab',
+                        padding: '4px',
+                        borderRadius: '4px',
+                        backgroundColor: draggedItemIndex === idx ? 'var(--bg-secondary)' : 'transparent',
+                        border: '1px solid transparent',
+                        transition: 'background-color 0.2s'
+                      }}
+                      onDragEnd={() => setDraggedItemIndex(null)}
+                    >
+                      <span style={{ minWidth: '24px', fontWeight: 'bold', fontSize: '0.9rem', color: 'var(--text-muted)' }}>{num}.</span>
                       {puzzle.isWListStar && (
                         <input
                           type="checkbox"
@@ -1346,9 +1423,9 @@ function App() {
                 <AnswerArea
                   groups={alphabetGroups}
                   cellSize={baseCellSize}
-                  charMap={answerChars}
+                  charMap={appMode === 'answer' ? answerChars : {}}
                   isRemainingAnswer={puzzle.isRemainingAnswer}
-                  remainingAnswerWord={puzzle.remainingAnswerWord}
+                  remainingAnswerWord={appMode === 'answer' ? (puzzle.remainingAnswerWord || '') : ''}
                   list2={puzzle.wordList2 || []}
                   onSelectRemaining={setRemainingAnswerWord}
                 />

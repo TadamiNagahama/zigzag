@@ -39,7 +39,8 @@ const recomputeNumbers = (
   cells: Cell[][],
   currentWordList: Record<number, string>,
   currentWordDirections?: Record<number, string>,
-  currentWordStarList?: Record<number, boolean>
+  currentWordStarList?: Record<number, boolean>,
+  puzzleType?: PuzzleType
 ) => {
   // 1. 座標ごとの単語マップを作成 (現在の番号 -> 座標 -> 単語)
   const coordsToWord: Record<string, string> = {};
@@ -74,7 +75,15 @@ const recomputeNumbers = (
       const word = coordsToWord[`${cell.x},${cell.y}`];
       if (word) {
         newWordList[num] = word;
-        newCell.char = word.charAt(0); // 頭文字も維持
+        if (puzzleType === 'ナンバーレス') {
+          // ナンバーレスモードに切り替えた際、自動表示されていた頭文字を消去する
+          if (newCell.char === word.charAt(0)) {
+            newCell.char = '';
+          }
+        } else {
+          // ナンバーレス以外では頭文字を自動で表示
+          newCell.char = word.charAt(0);
+        }
       }
       const dir = coordsToDirection[`${cell.x},${cell.y}`];
       if (dir) {
@@ -90,11 +99,12 @@ const recomputeNumbers = (
     return newCell;
   }));
 
-  return { cells: newCells, wordList: newWordList, wordDirections: newWordDirections, wordStarList: newWordStarList };
+  const numbers = Array.from({ length: count - 1 }, (_, i) => i + 1);
+  return { cells: newCells, wordList: newWordList, wordDirections: newWordDirections, wordStarList: newWordStarList, numbers };
 };
 
-const recomputeNumbersWithDirections = (cells: Cell[][], currentWordList: Record<number, string>, currentWordDirections?: Record<number, string>, currentWordStarList?: Record<number, boolean>) => {
-  return recomputeNumbers(cells, currentWordList, currentWordDirections, currentWordStarList);
+const recomputeNumbersWithDirections = (cells: Cell[][], currentWordList: Record<number, string>, currentWordDirections?: Record<number, string>, currentWordStarList?: Record<number, boolean>, puzzleType?: PuzzleType) => {
+  return recomputeNumbers(cells, currentWordList, currentWordDirections, currentWordStarList, puzzleType);
 };
 
 const getInitialPuzzle = (w: number, h: number): PuzzleData => {
@@ -120,6 +130,16 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
     canUndo,
     canRedo
   } = useUndoRedo<PuzzleData>(getInitialPuzzle(initialWidth, initialHeight));
+  
+  const syncOrder = useCallback((oldOrder: number[] | undefined, newNumbers: number[]): number[] => {
+    const newSet = new Set(newNumbers);
+    const order = (oldOrder || []).filter(n => newSet.has(n));
+    const orderSet = new Set(order);
+    newNumbers.forEach(n => {
+      if (!orderSet.has(n)) order.push(n);
+    });
+    return order;
+  }, []);
 
   // 盤面サイズの変更
   const resizeBoard = useCallback((h: number, w: number) => {
@@ -171,15 +191,13 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
         }
         newCells.push(row);
       }
-      const { cells: finalCells, wordList: finalWordList, wordDirections: finalWordDirections, wordStarList: finalWordStarList } = recomputeNumbersWithDirections(newCells, prev.wordList, prev.wordDirections, prev.wordStarList);
+      const result = recomputeNumbersWithDirections(newCells, prev.wordList, prev.wordDirections, prev.wordStarList, prev.puzzleType);
       return {
         ...prev,
         width: w,
         height: h,
-        cells: finalCells,
-        wordList: finalWordList,
-        wordDirections: finalWordDirections,
-        wordStarList: finalWordStarList,
+        ...result,
+        customWordOrder: syncOrder(prev.customWordOrder, result.numbers),
         updatedAt: Date.now()
       };
     });
@@ -196,7 +214,13 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
         cell.answerChar = '';
         cell.answerKey = null;
       }
-      return { ...prev, ...recomputeNumbersWithDirections(newCells, prev.wordList, prev.wordDirections, prev.wordStarList), updatedAt: Date.now() };
+      const result = recomputeNumbersWithDirections(newCells, prev.wordList, prev.wordDirections, prev.wordStarList, prev.puzzleType);
+      return { 
+        ...prev, 
+        ...result, 
+        customWordOrder: syncOrder(prev.customWordOrder, result.numbers),
+        updatedAt: Date.now() 
+      };
     });
   }, [push]);
 
@@ -210,7 +234,13 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
       if (!cell.isNumbered) {
         cell.char = '';
       }
-      return { ...prev, ...recomputeNumbersWithDirections(newCells, prev.wordList, prev.wordDirections, prev.wordStarList), updatedAt: Date.now() };
+      const result = recomputeNumbersWithDirections(newCells, prev.wordList, prev.wordDirections, prev.wordStarList, prev.puzzleType);
+      return { 
+        ...prev, 
+        ...result, 
+        customWordOrder: syncOrder(prev.customWordOrder, result.numbers),
+        updatedAt: Date.now() 
+      };
     });
   }, [push]);
 
@@ -233,7 +263,9 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
       const isStar = prev.wordStarList?.[number];
       const newCells = prev.cells.map(row => row.map(cell => {
         if (cell.number === number) {
-          return { ...cell, char: isStar ? '' : word.charAt(0) };
+          // ナンバーレスモードの場合は頭文字を自動で入れない
+          const char = (isStar || prev.puzzleType === 'ナンバーレス') ? '' : word.charAt(0);
+          return { ...cell, char };
         }
         return { ...cell };
       }));
@@ -275,14 +307,19 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
   }, [push]);
 
   const setPuzzleType = useCallback((puzzleType: PuzzleType) => {
-    push(prev => ({
-      ...prev,
-      puzzleType,
-      isWList: puzzleType === 'Wリスト',
-      isWListStar: puzzleType === 'Wリスト★',
-      isArrowMode: puzzleType === '矢印',
-      updatedAt: Date.now()
-    }));
+    push(prev => {
+      const result = recomputeNumbersWithDirections(prev.cells, prev.wordList, prev.wordDirections, prev.wordStarList, puzzleType);
+      return {
+        ...prev,
+        ...result,
+        puzzleType,
+        isWList: puzzleType === 'Wリスト',
+        isWListStar: puzzleType === 'Wリスト★',
+        isArrowMode: puzzleType === '矢印',
+        customWordOrder: syncOrder(prev.customWordOrder, result.numbers),
+        updatedAt: Date.now()
+      };
+    });
   }, [push]);
 
   const setIsWList = useCallback((isWList: boolean) => {
@@ -342,7 +379,7 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
     push(prev => {
       const newCells = prev.cells.map(row => row.map(cell => ({ ...cell })));
       newCells[y][x].char = char;
-      return { ...prev, cells: newCells, updatedAt: Date.now() };
+      return { ...prev, ...recomputeNumbersWithDirections(newCells, prev.wordList, prev.wordDirections, prev.wordStarList, prev.puzzleType), updatedAt: Date.now() };
     });
   }, [push]);
 
@@ -422,7 +459,13 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
         }
       }
 
-      return { ...prev, ...recomputeNumbersWithDirections(newCells, prev.wordList, prev.wordDirections, prev.wordStarList), updatedAt: Date.now() };
+      const result = recomputeNumbersWithDirections(newCells, prev.wordList, prev.wordDirections, prev.wordStarList, prev.puzzleType);
+      return { 
+        ...prev, 
+        ...result, 
+        customWordOrder: syncOrder(prev.customWordOrder, result.numbers),
+        updatedAt: Date.now() 
+      };
     });
   }, [push]);
 
@@ -445,7 +488,13 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
         }
       }
 
-      return { ...prev, ...recomputeNumbersWithDirections(newCells, prev.wordList, prev.wordDirections, prev.wordStarList), updatedAt: Date.now() };
+      const result = recomputeNumbersWithDirections(newCells, prev.wordList, prev.wordDirections, prev.wordStarList, prev.puzzleType);
+      return { 
+        ...prev, 
+        ...result, 
+        customWordOrder: syncOrder(prev.customWordOrder, result.numbers),
+        updatedAt: Date.now() 
+      };
     });
   }, [push]);
 
@@ -491,6 +540,35 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
     removeTag,
     mergeCells,
     splitCell,
+    reorderWordList: useCallback((startIndex: number, endIndex: number) => {
+      push(prev => {
+        const boardNumbers = new Set<number>();
+        prev.cells.forEach(row => row.forEach(cell => {
+          if (cell.number) boardNumbers.add(cell.number);
+        }));
+        const numbers = Array.from(boardNumbers).sort((a, b) => a - b);
+        const currentOrder = prev.customWordOrder || numbers;
+        const newOrder = Array.from(currentOrder);
+        const [removed] = newOrder.splice(startIndex, 1);
+        newOrder.splice(endIndex, 0, removed);
+        return { ...prev, customWordOrder: newOrder, updatedAt: Date.now() };
+      });
+    }, [push]),
+    sortWordListAlphabetically: useCallback(() => {
+      push(prev => {
+        const boardNumbers = new Set<number>();
+        prev.cells.forEach(row => row.forEach(cell => {
+          if (cell.number) boardNumbers.add(cell.number);
+        }));
+        const numbers = Array.from(boardNumbers);
+        const sorted = numbers.sort((a, b) => {
+          const wordA = prev.wordList[a] || '';
+          const wordB = prev.wordList[b] || '';
+          return wordA.localeCompare(wordB, 'ja');
+        });
+        return { ...prev, customWordOrder: sorted, updatedAt: Date.now() };
+      });
+    }, [push]),
     takeCheckpoint,
     undo,
     redo,

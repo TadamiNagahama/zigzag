@@ -45,7 +45,7 @@ export const SizeDialog: React.FC<SizeDialogProps> = ({ currentWidth, currentHei
           </button>
         </header>
 
-        <div className="radio-group" style={{ marginBottom: '12px', display: 'grid', gap: '12px' }}>
+        <div className="radio-group" style={{ marginBottom: '12px', display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
           {PRESETS.map(p => (
             <div 
               key={`${p.h}x${p.w}`}
@@ -70,16 +70,16 @@ export const SizeDialog: React.FC<SizeDialogProps> = ({ currentWidth, currentHei
         <div 
           className={`radio-option ${isCustom ? 'selected' : ''}`}
           onClick={() => setIsCustom(true)}
-          style={{ width: '100%', marginBottom: '16px', padding: '10px 12px' }}
+          style={{ width: '100%', marginBottom: '12px', padding: '10px 12px' }}
         >
           <input type="radio" checked={isCustom} onChange={() => {}} style={{ cursor: 'pointer' }} />
           <span style={{ fontSize: '0.9rem' }}>自由サイズ (1〜100)</span>
         </div>
 
         {isCustom && (
-          <div className="custom-size-inputs" style={{ display: 'flex', gap: '12px', marginTop: '0' }}>
-            <div style={{ flex: 1 }}>
-              <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 'bold' }}>タテ</label>
+          <div className="custom-size-inputs" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
+            <div>
+              <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>タテ</label>
               <input 
                 type="number" 
                 value={customHeight} 
@@ -87,11 +87,11 @@ export const SizeDialog: React.FC<SizeDialogProps> = ({ currentWidth, currentHei
                 className="input-field"
                 min="1"
                 max="100"
-                style={{ marginTop: '4px', width: '100%' }}
+                style={{ width: '100%' }}
               />
             </div>
-            <div style={{ flex: 1 }}>
-              <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 'bold' }}>ヨコ</label>
+            <div>
+              <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>ヨコ</label>
               <input 
                 type="number" 
                 value={customWidth} 
@@ -99,7 +99,7 @@ export const SizeDialog: React.FC<SizeDialogProps> = ({ currentWidth, currentHei
                 className="input-field"
                 min="1"
                 max="100"
-                style={{ marginTop: '4px', width: '100%' }}
+                style={{ width: '100%' }}
               />
             </div>
           </div>
