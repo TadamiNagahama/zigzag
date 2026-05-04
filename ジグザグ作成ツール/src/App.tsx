@@ -48,10 +48,9 @@ function App() {
     setPuzzleType,
     setAnswerKey,
     toggleShaded,
-    updateCellChar,
     updateCellAnswerChar,
     reorderWordList,
-    sortWordListAlphabetically,
+    setWordListOrderMode,
     addTag,
     removeTag,
     mergeCells,
@@ -513,7 +512,7 @@ function App() {
       if (ny >= puzzle.height) {
         ny = 0;
       }
-      
+
       // 一周したら終了（無限ループ防止）
       if (nx === startX && ny === startY) break;
 
@@ -889,9 +888,9 @@ function App() {
 
       const availW = scrollArea.clientWidth - 40;
       const availH = scrollArea.clientHeight - 40;
-      
+
       const rect = content.getBoundingClientRect();
-      const naturalW = rect.width / zoom; 
+      const naturalW = rect.width / zoom;
       const naturalH = rect.height / zoom;
 
       if (naturalW > 0 && naturalH > 0) {
@@ -1006,19 +1005,19 @@ function App() {
 
 
   return (
-    <Layout 
+    <Layout
       onExport={handleExport}
       onNew={handleNew}
       onSave={handleSave}
       onLoad={handleLoad}
       onHelp={() => setShowHelpDialog(true)}
       onSettings={() => {
-          if (window.innerWidth < 768) {
-            setShowMobileSettingsMenu(true);
-          } else {
-            setShowSettingsDialog(true);
-          }
-        }}
+        if (window.innerWidth < 768) {
+          setShowMobileSettingsMenu(true);
+        } else {
+          setShowSettingsDialog(true);
+        }
+      }}
       undo={undo}
       redo={redo}
       canUndo={canUndo}
@@ -1137,14 +1136,16 @@ function App() {
               <div style={{ padding: '0' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0' }}>
                   <h4 style={{ margin: 0, fontSize: '0.9rem', color: 'var(--primary-color)' }}>単語リスト</h4>
-                  <button
-                    className="btn-secondary"
-                    style={{ fontSize: '0.7rem', padding: '2px 6px' }}
-                    onClick={sortWordListAlphabetically}
-                    title="あいうえお順に並べ替え"
-                  >
-                    あいうえお順
-                  </button>
+                  {(puzzle.puzzleType === 'ナンバーレス' || puzzle.puzzleType === '部分ナンバーレス') && (
+                    <button
+                      className="btn-secondary"
+                      style={{ fontSize: '0.7rem', padding: '2px 6px' }}
+                      onClick={() => setWordListOrderMode(puzzle.wordListOrderMode === 'alphabetical' ? 'numerical' : 'alphabetical')}
+                      title={puzzle.wordListOrderMode === 'alphabetical' ? "数字順に並べ替え" : "あいうえお順に並べ替え"}
+                    >
+                      {puzzle.wordListOrderMode === 'alphabetical' ? '数字順へ' : 'あいうえお順へ'}
+                    </button>
+                  )}
                 </div>
 
               </div>
@@ -1156,11 +1157,12 @@ function App() {
             <section style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', padding: '12px 16px' }}>
               <div style={{ fontSize: '0.8rem' }}>
                 <div className="word-list-grid" style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
-                  {(puzzle.customWordOrder || numbers).map((num, idx) => (
+                  {(puzzle.wordListOrderMode === 'alphabetical' ? (puzzle.customAlphabeticalOrder || numbers) : numbers).map((num, idx) => (
                     <div
                       key={num}
-                      draggable
+                      draggable={puzzle.wordListOrderMode === 'alphabetical'}
                       onDragStart={(e) => {
+                        if (puzzle.wordListOrderMode !== 'alphabetical') return;
                         setDraggedItemIndex(idx);
                         e.dataTransfer.effectAllowed = 'move';
                       }}
@@ -1175,9 +1177,9 @@ function App() {
                         }
                         setDraggedItemIndex(null);
                       }}
-                      style={{ 
-                        display: 'flex', 
-                        alignItems: 'center', 
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
                         gap: '6px',
                         cursor: 'grab',
                         padding: '4px',
@@ -1690,11 +1692,11 @@ function App() {
       )}
       {showHelpDialog && <HelpDialog onClose={() => setShowHelpDialog(false)} />}
       {showWelcomeDialog && (
-        <WelcomeDialog 
+        <WelcomeDialog
           onAccept={() => {
             localStorage.setItem('zigzag_welcome_agreed', 'true');
             setShowWelcomeDialog(false);
-          }} 
+          }}
         />
       )}
       {/* スマホ用設定メニュー */}
@@ -1703,8 +1705,8 @@ function App() {
           <div className="modal-content" onClick={e => e.stopPropagation()} style={{ width: '80%', padding: '20px' }}>
             <h3 style={{ marginBottom: '20px', textAlign: 'center' }}>設定メニュー</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <button 
-                className="btn-primary" 
+              <button
+                className="btn-primary"
                 style={{ padding: '16px', fontSize: '1rem' }}
                 onClick={() => {
                   setShowMobileSettingsMenu(false);
@@ -1713,8 +1715,8 @@ function App() {
               >
                 サイズ変更
               </button>
-              <button 
-                className="btn-secondary" 
+              <button
+                className="btn-secondary"
                 style={{ padding: '16px', fontSize: '1rem' }}
                 onClick={() => {
                   setShowMobileSettingsMenu(false);
@@ -1723,8 +1725,8 @@ function App() {
               >
                 詳細設定
               </button>
-              <button 
-                className="btn-secondary" 
+              <button
+                className="btn-secondary"
                 style={{ marginTop: '10px', padding: '12px', border: 'none', color: 'var(--text-muted)' }}
                 onClick={() => setShowMobileSettingsMenu(false)}
               >

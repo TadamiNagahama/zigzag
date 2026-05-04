@@ -46,7 +46,8 @@ export interface PuzzleData {
   boardFontWeight?: 'normal' | 'bold'; // 盤面のフォントの太さ
   boardFontFamily?: string; // 盤面のフォント名
   tags?: string[]; // タグ一覧
-  customWordOrder?: number[]; // 単語リストの表示順序（番号の配列）
+  customAlphabeticalOrder?: number[]; // あいうえお順の表示順序（番号の配列）
+  wordListOrderMode?: 'numerical' | 'alphabetical'; // 現在の表示モード
   updatedAt: number;
 }
 

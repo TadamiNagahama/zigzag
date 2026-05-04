@@ -337,7 +337,12 @@ const renderWordList = (
       if (cell.number) boardNumbers.add(cell.number);
     }));
     const numbers = Array.from(boardNumbers).sort((a, b) => a - b);
-    const order = puzzle.customWordOrder || numbers;
+    let order = numbers;
+    if (puzzle.puzzleType === 'ナンバーレス' || puzzle.puzzleType === '部分ナンバーレス') {
+      if (puzzle.wordListOrderMode === 'alphabetical') {
+        order = puzzle.customAlphabeticalOrder || numbers;
+      }
+    }
     const wordEntries = order.map(id => ({
       id,
       word: puzzle.wordList[id] || ''

@@ -141,6 +141,26 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
     return order;
   }, []);
 
+  const setWordListOrderMode = useCallback((mode: 'numerical' | 'alphabetical') => {
+    push(prev => {
+      let customAlphabeticalOrder = prev.customAlphabeticalOrder;
+      if (mode === 'alphabetical' && !customAlphabeticalOrder) {
+        // 初期化: 漢字コード順でソート
+        const boardNumbers = new Set<number>();
+        prev.cells.forEach(row => row.forEach(cell => {
+          if (cell.number) boardNumbers.add(cell.number);
+        }));
+        const numbers = Array.from(boardNumbers);
+        customAlphabeticalOrder = numbers.sort((a, b) => {
+          const wordA = prev.wordList[a] || '';
+          const wordB = prev.wordList[b] || '';
+          return wordA.localeCompare(wordB, 'ja');
+        });
+      }
+      return { ...prev, wordListOrderMode: mode, customAlphabeticalOrder, updatedAt: Date.now() };
+    });
+  }, [push]);
+
   // 盤面サイズの変更
   const resizeBoard = useCallback((h: number, w: number) => {
     push(prev => {
@@ -197,7 +217,7 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
         width: w,
         height: h,
         ...result,
-        customWordOrder: syncOrder(prev.customWordOrder, result.numbers),
+        customAlphabeticalOrder: syncOrder(prev.customAlphabeticalOrder, result.numbers),
         updatedAt: Date.now()
       };
     });
@@ -218,7 +238,7 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
       return { 
         ...prev, 
         ...result, 
-        customWordOrder: syncOrder(prev.customWordOrder, result.numbers),
+        customAlphabeticalOrder: syncOrder(prev.customAlphabeticalOrder, result.numbers),
         updatedAt: Date.now() 
       };
     });
@@ -238,7 +258,7 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
       return { 
         ...prev, 
         ...result, 
-        customWordOrder: syncOrder(prev.customWordOrder, result.numbers),
+        customAlphabeticalOrder: syncOrder(prev.customAlphabeticalOrder, result.numbers),
         updatedAt: Date.now() 
       };
     });
@@ -316,7 +336,7 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
         isWList: puzzleType === 'Wリスト',
         isWListStar: puzzleType === 'Wリスト★',
         isArrowMode: puzzleType === '矢印',
-        customWordOrder: syncOrder(prev.customWordOrder, result.numbers),
+        customAlphabeticalOrder: syncOrder(prev.customAlphabeticalOrder, result.numbers),
         updatedAt: Date.now()
       };
     });
@@ -463,7 +483,7 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
       return { 
         ...prev, 
         ...result, 
-        customWordOrder: syncOrder(prev.customWordOrder, result.numbers),
+        customAlphabeticalOrder: syncOrder(prev.customAlphabeticalOrder, result.numbers),
         updatedAt: Date.now() 
       };
     });
@@ -492,7 +512,7 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
       return { 
         ...prev, 
         ...result, 
-        customWordOrder: syncOrder(prev.customWordOrder, result.numbers),
+        customAlphabeticalOrder: syncOrder(prev.customAlphabeticalOrder, result.numbers),
         updatedAt: Date.now() 
       };
     });
@@ -547,28 +567,14 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
           if (cell.number) boardNumbers.add(cell.number);
         }));
         const numbers = Array.from(boardNumbers).sort((a, b) => a - b);
-        const currentOrder = prev.customWordOrder || numbers;
+        const currentOrder = prev.customAlphabeticalOrder || numbers;
         const newOrder = Array.from(currentOrder);
         const [removed] = newOrder.splice(startIndex, 1);
         newOrder.splice(endIndex, 0, removed);
-        return { ...prev, customWordOrder: newOrder, updatedAt: Date.now() };
+        return { ...prev, customAlphabeticalOrder: newOrder, updatedAt: Date.now() };
       });
     }, [push]),
-    sortWordListAlphabetically: useCallback(() => {
-      push(prev => {
-        const boardNumbers = new Set<number>();
-        prev.cells.forEach(row => row.forEach(cell => {
-          if (cell.number) boardNumbers.add(cell.number);
-        }));
-        const numbers = Array.from(boardNumbers);
-        const sorted = numbers.sort((a, b) => {
-          const wordA = prev.wordList[a] || '';
-          const wordB = prev.wordList[b] || '';
-          return wordA.localeCompare(wordB, 'ja');
-        });
-        return { ...prev, customWordOrder: sorted, updatedAt: Date.now() };
-      });
-    }, [push]),
+    setWordListOrderMode,
     takeCheckpoint,
     undo,
     redo,

@@ -27,3 +27,6 @@ dist-ssr
 .firebase
 scratch
 dic
+.vite
+**/node_modules
+**/dist
