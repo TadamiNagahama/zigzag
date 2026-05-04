@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 
 export type BoardCellMode = '1x1' | '2x1' | '3x3';
 export type AnswerAreaMode = '1x1' | '2x1';
-export type ListPlacement = 'bottom' | 'right';
+export type ListPlacement = 'bottom' | 'right' | 'separate';
 export type AlphabetPos = 'top' | 'bottom';
 
 export interface ExportOptions {
@@ -151,7 +151,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ initialOptions, hasS
 
   return (
     <div className="modal-overlay" style={{ zIndex: 3000 }}>
-      <div className="modal-content glass card" style={{ padding: '24px', maxHeight: '90vh', overflowY: 'auto' }}>
+      <div className="modal-content glass card" style={{ width: '550px', maxWidth: '95vw', padding: '24px', maxHeight: '90vh', overflowY: 'auto' }}>
         <h3 style={{ marginBottom: '20px', borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }}>Excel出力設定</h3>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -461,6 +461,14 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ initialOptions, hasS
                     checked={options.listPlacement === 'right'}
                     onChange={() => setOptions({ ...options, listPlacement: 'right' })}
                   /> 盤面の右
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="listPlace"
+                    checked={options.listPlacement === 'separate'}
+                    onChange={() => setOptions({ ...options, listPlacement: 'separate' })}
+                  /> シート単独
                 </label>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '0.9rem' }}>

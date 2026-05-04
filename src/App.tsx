@@ -98,6 +98,10 @@ function App() {
     return saved === 'true';
   });
 
+  const [lastExportFileName, setLastExportFileName] = useState<string | null>(() => {
+    return localStorage.getItem('zigzag_last_export_filename');
+  });
+
   // 最新のパズル状態を保持するref（setInterval用）
   const latestPuzzleRef = useRef(puzzle);
   useEffect(() => {
@@ -196,7 +200,12 @@ function App() {
 
   const handleExportConfirm = async (options: ExportOptions) => {
     try {
-      await exportToExcel(puzzle, options);
+      const suggestedName = lastExportFileName || puzzle.title;
+      const actualName = await exportToExcel(puzzle, options, suggestedName);
+      if (actualName) {
+        setLastExportFileName(actualName);
+        localStorage.setItem('zigzag_last_export_filename', actualName);
+      }
       if (user) {
         const q = query(collection(dbFirestore, 'userSettings'), where('userId', '==', user.uid));
         const snap = await getDocs(q);
@@ -473,13 +482,21 @@ function App() {
     let ny = y;
 
     // 次の入力可能なマス（提示文字がないマス）を探す
+    let startX = x;
+    let startY = y;
     while (true) {
       nx++;
       if (nx >= puzzle.width) {
         nx = 0;
         ny++;
       }
-      if (ny >= puzzle.height) break;
+      if (ny >= puzzle.height) {
+        ny = 0;
+      }
+      
+      // 一周したら終了（無限ループ防止）
+      if (nx === startX && ny === startY) break;
+
       if (!puzzle.cells[ny][nx].char && puzzle.cells[ny][nx].type === 'normal') {
         setFocusedCell({ x: nx, y: ny });
         return;
@@ -805,10 +822,10 @@ function App() {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
       e.preventDefault();
       let { x, y } = focusedCell;
-      if (e.key === 'ArrowUp' && y > 0) y--;
-      if (e.key === 'ArrowDown' && y < puzzle.height - 1) y++;
-      if (e.key === 'ArrowLeft' && x > 0) x--;
-      if (e.key === 'ArrowRight' && x < puzzle.width - 1) x++;
+      if (e.key === 'ArrowUp') y = y > 0 ? y - 1 : puzzle.height - 1;
+      if (e.key === 'ArrowDown') y = y < puzzle.height - 1 ? y + 1 : 0;
+      if (e.key === 'ArrowLeft') x = x > 0 ? x - 1 : puzzle.width - 1;
+      if (e.key === 'ArrowRight') x = x < puzzle.width - 1 ? x + 1 : 0;
       setFocusedCell({ x, y });
     } else if (e.key === 'Enter') {
       e.preventDefault();

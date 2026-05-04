@@ -152,6 +152,21 @@ const renderPuzzleSection = (
     fgColor: { argb: 'FFD9D9D9' } // 15%グレー
   };
 
+  // 解答マス（アルファベット）用のドットパターン (灰色12.5%)
+  const alphabetPatternFill: ExcelJS.Fill = {
+    type: 'pattern',
+    pattern: 'gray125',
+    fgColor: { argb: 'FF888888' } // ドットの色
+  };
+
+  // 網掛けと解答マスが重なった場合
+  const shadedAlphabetFill: ExcelJS.Fill = {
+    type: 'pattern',
+    pattern: 'gray125',
+    fgColor: { argb: 'FF000000' }, // 重なり時は少し濃いめのドット
+    bgColor: { argb: 'FFD9D9D9' }  // 背景は網掛けのグレー
+  };
+
   for (let py = 0; py < puzzle.height; py++) {
     for (let px = 0; px < puzzle.width; px++) {
       const cell = puzzle.cells[py][px];
@@ -185,8 +200,12 @@ const renderPuzzleSection = (
           if (c === excelW - 1) border.right = { style: 'thin' };
           cCell.border = border;
           
-          if (cell.isShaded || cell.answerKey) {
+          if (cell.isShaded && cell.answerKey) {
+            cCell.fill = shadedAlphabetFill;
+          } else if (cell.isShaded) {
             cCell.fill = shadingFill;
+          } else if (cell.answerKey) {
+            cCell.fill = alphabetPatternFill;
           }
         }
       }
@@ -196,7 +215,7 @@ const renderPuzzleSection = (
       const num = (!hideContent && cell.isNumbered) ? cell.number : null;
       const hintChar = (!hideContent && cell.char) ? cell.char : '';
       const answerChar = (!hideContent && !isQuestion && cell.answerChar) ? cell.answerChar : '';
-      const alpha = (!hideContent) ? (cell.answerKey || '') : '';
+      const alpha = cell.answerKey || ''; // アルファベット（解答キー）は常に表示
 
       if (options.boardCellMode === '1x1') {
         worksheet.getRow(ey).height = pxToPoints(options.cellHeight1);
@@ -285,7 +304,33 @@ const renderPuzzleSection = (
 
   // 4. 単語リスト
   let nextRow = boardEndRow + 2;
-  if (includeWordList) {
+  const shouldRenderListInSheet = includeWordList && options.listPlacement !== 'separate';
+  if (shouldRenderListInSheet) {
+    nextRow = renderWordList(worksheet, nextRow, 1, puzzle, options, defaultFontName, boardStartRow, boardEndRow, colStep);
+  }
+
+  const maxCol = Math.max(puzzle.width * colStep + 10, 50);
+  for (let i = 1; i <= maxCol; i++) {
+    if (!worksheet.getColumn(i).width) worksheet.getColumn(i).width = pxToChars(options.cellWidth);
+  }
+
+  return nextRow + 2;
+};
+
+/**
+ * 単語リストの描画ロジックを共通化
+ */
+const renderWordList = (
+  worksheet: ExcelJS.Worksheet,
+  startRow: number,
+  startCol: number,
+  puzzle: PuzzleData,
+  options: ExportOptions,
+  defaultFontName: string,
+  boardStartRow: number,
+  boardEndRow: number,
+  colStep: number
+) => {
     const boardNumbers = new Set<number>();
     puzzle.cells.forEach(row => row.forEach(cell => {
       if (cell.number) boardNumbers.add(cell.number);
@@ -298,8 +343,10 @@ const renderPuzzleSection = (
       const totalItems = wordEntries.length;
       const itemsPerCol = Math.ceil(totalItems / numCols);
       const isRight = options.listPlacement === 'right';
+      const isSeparate = options.listPlacement === 'separate';
+      let nextRow = startRow;
 
-      const cellsPerEntry = (options.boardCellMode === '3x3' && !isRight) ? 9 : 3;
+      const cellsPerEntry = isSeparate ? 3 : ((options.boardCellMode === '3x3' && !isRight) ? 9 : 3);
       const wordColOffset = 1; // 数字のすぐ右に単語を配置
 
       wordEntries.forEach((entry, index) => {
@@ -311,8 +358,8 @@ const renderPuzzleSection = (
           r = boardStartRow + rowIndex;
           c = (puzzle.width + 1) * colStep + 1 + colIndex * cellsPerEntry;
         } else {
-          r = boardEndRow + 2 + rowIndex;
-          c = 1 + colIndex * cellsPerEntry;
+          r = startRow + rowIndex;
+          c = startCol + colIndex * cellsPerEntry;
         }
         
         const isArrow = puzzle.isArrowMode;
@@ -359,7 +406,7 @@ const renderPuzzleSection = (
         if (list2Words.length > 0) {
           const itemsPerCol2 = Math.ceil(list2Words.length / numCols);
           const list2HeaderRow = (isRight ? boardStartRow + (itemsPerCol || 0) + 1 : nextRow + 1);
-          const list2StartCol = (isRight ? (puzzle.width + 1) * colStep + 1 : 1);
+          const list2StartCol = (isRight ? (puzzle.width + 1) * colStep + 1 : startCol);
           
           // リスト2の見出しを追加
           const hCell = worksheet.getCell(list2HeaderRow, list2StartCol + (puzzle.isArrowMode ? 2 : wordColOffset));
@@ -384,45 +431,102 @@ const renderPuzzleSection = (
           });
         }
       }
-    }
-
-  const maxCol = Math.max(puzzle.width * colStep + 10, 50);
-  for (let i = 1; i <= maxCol; i++) {
-    if (!worksheet.getColumn(i).width) worksheet.getColumn(i).width = pxToChars(options.cellWidth);
-  }
-
-  return nextRow + 2;
+      return nextRow;
 };
 
-export const exportToExcel = async (puzzle: PuzzleData, options: ExportOptions) => {
+/**
+ * 単語リスト単独シートの描画
+ */
+const renderWordListSheet = (
+  worksheet: ExcelJS.Worksheet,
+  puzzle: PuzzleData,
+  options: ExportOptions
+) => {
+  const defaultFontName = options.fontName || 'MS Pゴシック';
+  const isBold = puzzle.boardFontWeight === 'bold';
+  const defaultFont = { name: defaultFontName, size: 11, bold: isBold };
+
+  // 1. タイトル
+  const displayTitle = (puzzle.boardTitle || puzzle.title || '無題のパズル') + '（単語リスト）';
+  const numCols = options.listColumns;
+  const mergeToCol = Math.max(1, numCols * 3 - 1); // (段数*3-1)
+  worksheet.mergeCells(1, 1, 1, mergeToCol);
+  const titleCell = worksheet.getCell(1, 1);
+  titleCell.value = displayTitle;
+  titleCell.font = { ...defaultFont, size: 16, bold: true };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle', shrinkToFit: true };
+
+  // リストの描画 (startRow=3 から開始)
+  renderWordList(worksheet, 3, 1, puzzle, options, defaultFontName, 1, 1, 1);
+  
+  // 列幅の調整
+  for (let i = 0; i < numCols; i++) {
+    const baseC = 1 + i * 3;
+    worksheet.getColumn(baseC).width = 2.5; // 数字の列: 2.50
+    if (puzzle.isArrowMode) {
+      worksheet.getColumn(baseC + 1).width = 2.5; // 矢印の列: 2.50
+      worksheet.getColumn(baseC + 2).width = 15; // リストの列: 15.00
+    } else {
+      worksheet.getColumn(baseC + 1).width = 15; // リストの列: 15.00
+      worksheet.getColumn(baseC + 2).width = 2.5;  // 空きセル: 2.50
+    }
+  }
+}
+
+export const exportToExcel = async (puzzle: PuzzleData, options: ExportOptions, suggestedFileName?: string) => {
   const workbook = new ExcelJS.Workbook();
-  const companyName = 'キンピラ工房';
-  workbook.creator = companyName;
-  (workbook.properties as any).company = companyName;
-  (workbook.properties as any).application = '漢字ジグザグ作成ツール';
+  // Excelの「個人情報が含まされています」警告を防ぐため、メタデータを完全に削除する
+  workbook.creator = undefined as any;
+  workbook.lastModifiedBy = undefined as any;
+  workbook.created = undefined as any;
+  workbook.modified = undefined as any;
+  workbook.lastPrinted = undefined as any;
+  if (workbook.properties) {
+    workbook.properties = {} as any;
+  }
 
   // 出力モード（網掛けの有無）に関わらず、常に問題と解答の両方を出力する
+  const isSeparateList = options.listPlacement === 'separate';
+
   if (options.superLayout === 'separate') {
     const ws1 = workbook.addWorksheet('問題');
     ws1.views = [{ showGridLines: true }];
-    renderPuzzleSection(ws1, 1, puzzle, options, true, true);
+    renderPuzzleSection(ws1, 1, puzzle, options, true, !isSeparateList);
     
+    if (isSeparateList) {
+      const wsList = workbook.addWorksheet('単語リスト');
+      wsList.views = [{ showGridLines: true }];
+      renderWordListSheet(wsList, puzzle, options);
+    }
+
     const ws2 = workbook.addWorksheet('解答');
     ws2.views = [{ showGridLines: true }];
     renderPuzzleSection(ws2, 1, puzzle, options, false, false);
   } else {
     const ws = workbook.addWorksheet('漢字ジグザグ');
     ws.views = [{ showGridLines: true }];
-    const nextRow = renderPuzzleSection(ws, 1, puzzle, options, true, true);
+    const nextRow = renderPuzzleSection(ws, 1, puzzle, options, true, !isSeparateList);
+    
+    if (isSeparateList) {
+      const wsList = workbook.addWorksheet('単語リスト');
+      wsList.views = [{ showGridLines: true }];
+      renderWordListSheet(wsList, puzzle, options);
+    }
+
     renderPuzzleSection(ws, nextRow + 2, puzzle, options, false, false);
   }
 
   const buffer = await workbook.xlsx.writeBuffer();
-  const fileName = `${puzzle.title || 'puzzle'}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  // デフォルトファイル名はタイトルのみ（日付を除去）。2回目以降は前回名が優先される。
+  let fileName = suggestedFileName || `${puzzle.title || 'puzzle'}.xlsx`;
+  if (!fileName.toLocaleLowerCase().endsWith('.xlsx')) fileName += '.xlsx';
   
+  let finalFileName = fileName;
+
   if ('showSaveFilePicker' in window) {
     try {
       const handle = await (window as any).showSaveFilePicker({ suggestedName: fileName, types: [{ description: 'Excel Workbook', accept: {'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx']}}]});
+      finalFileName = handle.name;
       const writable = await handle.createWritable();
       await writable.write(buffer);
       await writable.close();
@@ -434,4 +538,5 @@ export const exportToExcel = async (puzzle: PuzzleData, options: ExportOptions) 
     a.href = url; a.download = fileName; a.click();
     window.URL.revokeObjectURL(url);
   }
+  return finalFileName;
 };

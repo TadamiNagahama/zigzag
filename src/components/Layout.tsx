@@ -1,4 +1,4 @@
-import { Plus, Layout as LayoutIcon, Undo2, Redo2, LogIn, LogOut, HelpCircle, CheckCircle, Save, FolderOpen, Settings, List, Grid3X3, Square } from 'lucide-react';
+import { Plus, Layout as LayoutIcon, Undo2, Redo2, LogIn, HelpCircle, CheckCircle, Save, FolderOpen, Settings, List, Grid3X3, Square } from 'lucide-react';
 import { type User } from 'firebase/auth';
 import excelIcon from '../../assets/excel.png';
 

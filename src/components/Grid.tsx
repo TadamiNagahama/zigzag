@@ -131,8 +131,16 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick
                 // 枠線を考慮したサイズ計算
                 width: cellSize * spanW,
                 height: cellSize * spanH,
-                backgroundColor: cell.type === 'wall' ? 'var(--wall-color)' : (cell.answerKey ? '#e2e8f0' : (cell.isShaded && (appMode === 'answer' || isWList || isWListStar)) ? shadingColor : 'white'),
-                backgroundImage: (cell.isShaded && (appMode === 'answer' || isWList || isWListStar) && !cell.answerKey) ? 'repeating-linear-gradient(45deg, transparent, transparent 2px, rgba(0,0,0,0.1) 2px, rgba(0,0,0,0.1) 4px)' : 'none',
+                backgroundColor: cell.type === 'wall' 
+                  ? 'var(--wall-color)' 
+                  : ((cell.answerKey && (appMode === 'shade' || appMode === 'answer' || appMode === 'edit'))
+                      ? '#dcfce7' // 解答マス（アルファベット）は作成モードでも色を付ける
+                      : ((cell.isShaded && (appMode === 'shade' || appMode === 'answer'))
+                          ? shadingColor 
+                          : 'white')),
+                backgroundImage: (cell.isShaded && (appMode === 'shade' || appMode === 'answer')) 
+                  ? 'repeating-linear-gradient(45deg, transparent, transparent 2px, rgba(0,0,0,0.1) 2px, rgba(0,0,0,0.1) 4px)' 
+                  : 'none',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -159,7 +167,8 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick
                   lineHeight: '1',
                   color: 'var(--text-main)',
                   fontWeight: 'bold',
-                  zIndex: 3
+                  zIndex: 3,
+                  display: (appMode === 'shade' && cell.isShaded) ? 'none' : 'block'
                 }}>
                   {cell.number}
                 </span>
@@ -173,9 +182,9 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick
                 fontSize: `${cellSize * 0.55}px`,
                 textDecoration: (isFocused && composingText) ? 'underline wavy var(--accent-color)' : 'none',
                 opacity: (isFocused && composingText) ? 0.7 : 1,
-                zIndex: 2,
+                zIndex: (appMode === 'shade' && cell.isShaded && cell.answerKey) ? 5 : 2,
                 position: 'relative',
-                display: (appMode === 'shade' && cell.isShaded) ? 'none' : 'block'
+                display: (appMode === 'shade' && cell.isShaded && !cell.answerKey) ? 'none' : 'block'
               }}>
                 {(isFocused && composingText) ? composingText : (appMode === 'answer' ? (cell.answerChar || cell.char) : cell.char)}
               </span>
@@ -200,8 +209,8 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick
                     right: '1px',
                     color: '#dc2626',
                     fontWeight: 'bold',
-                    display: (appMode === 'shade' && cell.isShaded) ? 'none' : 'block',
-                    zIndex: 2
+                    display: (appMode === 'shade' && cell.isShaded && !cell.answerKey) ? 'none' : 'block',
+                    zIndex: (appMode === 'shade' && cell.isShaded && cell.answerKey) ? 5 : 2
                   }}>
                     {cell.answerKey}
                   </span>
@@ -209,14 +218,14 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick
               )}
 
               {/* Layer 2: 前面網掛け (文字を覆う) - 網掛けモード or Wリストモード時 */}
-              {((appMode === 'shade' && cell.isShaded) || ((isWList || isWListStar) && cell.isShaded && appMode === 'edit')) && (
+              {(appMode === 'shade' && cell.isShaded) && (
                 <div style={{
                   position: 'absolute',
                   top: 0, left: 0, right: 0, bottom: 0,
-                  backgroundColor: (isWList || isWListStar) ? 'transparent' : shadingColor,
+                  backgroundColor: cell.answerKey ? 'transparent' : shadingColor, // 解答マスの場合は背景を透かして緑を見せる
                   backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 2px, rgba(0,0,0,0.1) 2px, rgba(0,0,0,0.1) 4px)',
                   zIndex: 4,
-                  pointerEvents: 'none' // 下のマスをクリックできるようにする
+                  pointerEvents: 'none'
                 }} />
               )}
             </div>
