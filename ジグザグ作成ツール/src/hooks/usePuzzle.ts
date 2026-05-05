@@ -184,6 +184,15 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
     });
   }, [push]);
 
+  // 数字の表示/非表示トグル（ウルトラモード用）
+  const toggleNumbersHidden = useCallback(() => {
+    push(prev => ({
+      ...prev,
+      isNumbersHidden: !prev.isNumbersHidden,
+      updatedAt: Date.now()
+    }));
+  }, [push]);
+
   // 盤面サイズの変更
   const resizeBoard = useCallback((h: number, w: number) => {
     push(prev => {
@@ -633,5 +642,6 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
     reset: resetInternal,
     createNewBoard,
     togglePublicNumber,
+    toggleNumbersHidden,
   };
 };

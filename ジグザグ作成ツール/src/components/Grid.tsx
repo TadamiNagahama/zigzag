@@ -17,9 +17,10 @@ interface GridProps {
   wordList?: Record<number, string>;
   boardFontWeight?: 'normal' | 'bold';
   boardFontFamily?: string;
+  isNumbersHidden?: boolean;
 }
 
-export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick, onDragSelection, onDragPath, cellSize = 40, appMode = 'edit', focusedCell = null, composingText = '', shadingColor = '#e2e8f0', wordList = {}, boardFontWeight = 'normal', boardFontFamily = '' }) => {
+export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick, onDragSelection, onDragPath, cellSize = 40, appMode = 'edit', focusedCell = null, composingText = '', shadingColor = '#e2e8f0', wordList = {}, boardFontWeight = 'normal', boardFontFamily = '', isNumbersHidden = false }) => {
   const [dragStart, setDragStart] = useState<{ x: number, y: number } | null>(null);
   const [dragPath, setDragPath] = useState<{ x: number, y: number }[]>([]);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
@@ -166,7 +167,7 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick
                   color: 'var(--text-main)',
                   fontWeight: 'bold',
                   zIndex: 3,
-                  display: (appMode === 'shade' && cell.isShaded) ? 'none' : 'block'
+                  display: ((appMode === 'shade' && cell.isShaded) || isNumbersHidden) ? 'none' : 'block'
                 }}>
                   {cell.number}
                 </span>
@@ -182,7 +183,7 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick
                 opacity: (isFocused && composingText) ? 0.7 : 1,
                 zIndex: (appMode === 'shade' && cell.isShaded && cell.answerKey) ? 5 : 2,
                 position: 'relative',
-                display: (appMode === 'shade' && cell.isShaded && !cell.answerKey) ? 'none' : 'block'
+                display: (isNumbersHidden && cell.isNumbered) || (appMode === 'shade' && cell.isShaded && !cell.answerKey) ? 'none' : 'block'
               }}>
                 {(isFocused && composingText) 
                   ? composingText 

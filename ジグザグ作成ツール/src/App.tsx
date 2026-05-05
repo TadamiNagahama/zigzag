@@ -62,7 +62,8 @@ function App() {
     canRedo,
     reset,
     createNewBoard,
-    togglePublicNumber
+    togglePublicNumber,
+    toggleNumbersHidden
   } = usePuzzle(17, 17);
 
   const [editMode, setEditMode] = useState<EditMode>('number');
@@ -404,7 +405,10 @@ function App() {
             toggleNumberFlag(x, y);
             setFocusedCell(null);
           }
-
+        } else if (puzzle.puzzleType === 'ウルトラ') {
+          // ウルトラ: 数字をトグルしつつ、常に文字入力可能にする
+          toggleNumberFlag(x, y);
+          setFocusedCell({ x, y });
         } else {
           toggleNumberFlag(x, y);
         }
@@ -643,27 +647,29 @@ function App() {
 
     // 3. パス接続チェック
     if (errors.length === 0) {
-      const hasPath = (w: string, x: number, y: number, visited: Set<string>): boolean => {
-        if (w === '') return true;
-        if (x < 0 || x >= puzzle.width || y < 0 || y >= puzzle.height) return false;
+      const countPaths = (w: string, x: number, y: number, visited: Set<string>): number => {
+        if (x < 0 || x >= puzzle.width || y < 0 || y >= puzzle.height) return 0;
 
         const cell = puzzle.cells[y][x];
         const currentChar = cell.char || cell.answerChar;
-        if (cell.type !== 'normal' || currentChar !== w[0]) return false;
+        if (cell.type !== 'normal' || currentChar !== w[0]) return 0;
 
         const key = `${x},${y}`;
-        if (visited.has(key)) return false;
+        if (visited.has(key)) return 0;
+
+        const nextW = w.slice(1);
+        if (nextW === '') return 1;
 
         const newVisited = new Set(visited);
         newVisited.add(key);
-        const nextW = w.slice(1);
-        if (nextW === '') return true;
 
+        let total = 0;
         const neighbors = [[0, 1], [0, -1], [1, 0], [-1, 0]];
         for (const [dx, dy] of neighbors) {
-          if (hasPath(nextW, x + dx, y + dy, newVisited)) return true;
+          total += countPaths(nextW, x + dx, y + dy, newVisited);
+          if (total >= 2) break; // 2つ以上見つかれば十分
         }
-        return false;
+        return total;
       };
 
       for (const num of usedNumbers) {
@@ -689,8 +695,11 @@ function App() {
           continue;
         }
 
-        if (!hasPath(word, startPos.x, startPos.y, new Set())) {
+        const pathCount = countPaths(word, startPos.x, startPos.y, new Set());
+        if (pathCount === 0) {
           errors.push(`番号 ${num} (「${word}」) の経路が正しく繋がっていません`);
+        } else if (pathCount >= 2) {
+          errors.push(`番号 ${num} (「${word}」) の経路が2通り以上存在します`);
         } else if (puzzle.isArrowMode && word.length >= 2) {
           const arrow = puzzle.wordDirections?.[num] || '?';
           if (arrow !== '?') {
@@ -1090,12 +1099,12 @@ function App() {
                 </button>
               </div>
 
-              {/* ジャンル選択のドロップダウンのみ（ラベルなし） */}
-              <div style={{ marginBottom: '16px' }}>
+              {/* ジャンル選択のドロップダウンと数字非表示ボタン */}
+              <div style={{ marginBottom: '16px', display: 'flex', gap: '8px', alignItems: 'center' }}>
                 <select
                   value={puzzle.puzzleType || 'ノーマル'}
                   onChange={(e) => setPuzzleType(e.target.value as any)}
-                  style={{ width: '66.6%', padding: '6px', fontSize: '0.85rem', borderRadius: '4px', border: '1px solid var(--border-color)', backgroundColor: 'white', cursor: 'pointer' }}
+                  style={{ flex: 2, padding: '6px', fontSize: '0.85rem', borderRadius: '4px', border: '1px solid var(--border-color)', backgroundColor: 'white', cursor: 'pointer' }}
                 >
                   <option value="ノーマル">ノーマル</option>
                   <option value="Wリスト">Wリスト</option>
@@ -1107,6 +1116,16 @@ function App() {
                   <option value="変則">変則</option>
                   <option value="矢印">矢印</option>
                 </select>
+
+                {puzzle.puzzleType === 'ウルトラ' && (
+                  <button
+                    className={puzzle.isNumbersHidden ? 'btn-primary' : 'btn-secondary'}
+                    style={{ flex: 1, fontSize: '0.8rem', padding: '6px 4px', height: '34px', whiteSpace: 'nowrap' }}
+                    onClick={toggleNumbersHidden}
+                  >
+                    数字非表示
+                  </button>
+                )}
               </div>
 
               <div className="hide-on-mobile" style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '16px' }}>
@@ -1144,7 +1163,7 @@ function App() {
                   </>
                 ) : (
                   <div style={{ flex: 1, height: '42px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)', fontSize: '0.85rem', paddingLeft: '8px' }}>
-                    {appMode === 'shade' ? '網掛けマスを選択してください' : '番号の起点を選択してください'}
+                    {appMode === 'shade' ? '網掛けマスを選択してください' : ''}
                   </div>
                 )}
               </div>
@@ -1492,6 +1511,7 @@ function App() {
                     wordList={puzzle.wordList}
                     boardFontWeight={puzzle.boardFontWeight || 'normal'}
                     boardFontFamily={puzzle.boardFontFamily || ''}
+                    isNumbersHidden={puzzle.isNumbersHidden}
                   />
                 </div>
               </div>

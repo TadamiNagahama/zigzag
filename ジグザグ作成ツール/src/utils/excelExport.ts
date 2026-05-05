@@ -212,8 +212,9 @@ const renderPuzzleSection = (
 
       // 内容の描画
       const hideContent = isQuestion && cell.isShaded;
-      const num = (!hideContent && cell.isNumbered && puzzle.puzzleType !== 'ナンバーレス') ? cell.number : null;
-      const hintChar = (!hideContent && cell.char) ? cell.char : '';
+      const isUltraQuestion = isQuestion && puzzle.puzzleType === 'ウルトラ';
+      const num = (!hideContent && cell.isNumbered && puzzle.puzzleType !== 'ナンバーレス' && !isUltraQuestion) ? cell.number : null;
+      const hintChar = (!hideContent && cell.char && !(isUltraQuestion && cell.isNumbered)) ? cell.char : '';
       const answerChar = (!hideContent && !isQuestion && cell.answerChar) ? cell.answerChar : '';
       const alpha = cell.answerKey || ''; // アルファベット（解答キー）は常に表示
 
