@@ -1,20 +1,22 @@
 import React, { useState } from 'react';
-import { X, BookOpen, Edit3, CheckCircle, Layers, FileDown, Lock, Database, Mail } from 'lucide-react';
+import { X, BookOpen, Monitor, Edit3, CheckCircle, Layers, FileDown, Lock, Database, Mail, Shield } from 'lucide-react';
 
 interface HelpDialogProps {
   onClose: () => void;
 }
 
 export const HelpDialog: React.FC<HelpDialogProps> = ({ onClose }) => {
-  const [activeTab, setActiveTab] = useState<'intro' | 'edit' | 'answer' | 'genres' | 'export' | 'contact'>('intro');
+  const [activeTab, setActiveTab] = useState<'intro' | 'main' | 'edit' | 'answer' | 'genres' | 'export' | 'security' | 'contact'>('intro');
 
   const tabs = [
     { id: 'intro', label: 'はじめに', icon: <BookOpen size={18} /> },
+    { id: 'main', label: 'メイン画面', icon: <Monitor size={18} /> },
     { id: 'edit', label: '問題作成', icon: <Edit3 size={18} /> },
     { id: 'answer', label: '解答作成', icon: <CheckCircle size={18} /> },
     { id: 'genres', label: '特殊ジャンル', icon: <Layers size={18} /> },
     { id: 'export', label: 'Excel出力', icon: <FileDown size={18} /> },
-    { id: 'contact', label: 'お問い合わせ他', icon: <FileDown size={18} /> },
+    { id: 'security', label: 'セキュリティ', icon: <Shield size={18} /> },
+    { id: 'contact', label: 'お問い合わせ等', icon: <Mail size={18} /> },
   ] as const;
 
   const renderContent = () => {
@@ -23,59 +25,157 @@ export const HelpDialog: React.FC<HelpDialogProps> = ({ onClose }) => {
         return (
           <div className="help-content animate-fade-in">
             <h3>漢字ジグザグ作成ツールへようこそ</h3>
-            <p>このツールは、漢字ジグザグパズルの原稿を効率的に作成し、Excelファイルとして出力するための専門エディタです。</p>
+            <p>このツールは、漢字ジグザグパズルの原稿を効率的に作成し、Excelファイルとして出力するためのジグザグ専用ツールです。</p>
 
             <div className="help-section">
               <h4>基本の流れ</h4>
               <ol>
-                <li><strong>盤面の編集</strong>: 番号を配置してパズルの骨組みを作ります。</li>
-                <li><strong>単語の入力</strong>: リストにパズルで使用する熟語を入力します。</li>
+                <li><strong>網掛けの編集</strong>: 網掛けがある場合、網掛けマスを入力します。</li>
+                <li><strong>盤面の数字入力</strong>: 数字を配置します。ヒント文字や大マスがある場合文字の入力や大マスの設置をします。</li>
+                <li><strong>リストの入力</strong>: リストの言葉を入力します。特別なリスト（Wリスト★や矢印等）の設定をします。</li>
                 <li><strong>解答の作成</strong>: 盤面上でドラッグして、文字をトレースするように埋めていきます。</li>
-                <li><strong>Excel出力</strong>: 完成した原稿をプロ仕様のレイアウトで出力します。</li>
+                <li><strong>Excel出力</strong>: 完成した原稿をExcelファイルとして出力します。</li>
               </ol>
             </div>
 
-            <div className="help-info-box">
-              <p>まずは「問題作成」タブから、パズルの土台作りについて学びましょう。</p>
+          </div>
+        );
+      case 'main':
+        return (
+          <div className="help-content animate-fade-in">
+            <h3>メイン画面</h3>
+            <p>メニューエリア・リストエリア・盤面エリアの3つのエリアに分かれます</p>
+            <div className="help-image-container">
+              <img src="/help/main.png" alt="メイン画面" style={{ width: '100%', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+            </div>
+
+            <div className="help-section">
+              <h4>＜メニューエリア＞</h4>
+              <ul style={{ listStyle: 'none', paddingLeft: 0 }}>
+                <li><strong>・ログイン</strong>　Google認証を使っています。ログインをしなくても使用はできますが、データの保存ができません。</li>
+                <li><strong>・保存</strong>　いくらでもできますが、増えてくると管理が難しくなります。タグの機能をお使いください。</li>
+              </ul>
+            </div>
+
+            <div className="help-section">
+              <h4>＜リストエリア＞</h4>
+              <p style={{ marginBottom: '16px' }}>
+                上部に画面選択、ジャンル選択、小メニューエリア、<br />
+                中部に単語リストエリア、<br />
+                下部にズーム<br />
+                があります。
+              </p>
+              <p style={{ marginBottom: '12px' }}><strong>画面選択</strong>では網掛け・問題面・解答面の3つの画面を切り替えてデータの入力を行います。</p>
+              <p style={{ marginBottom: '12px' }}>
+                <strong>ジャンル選択</strong>ではノーマル・Ｗリスト・Ｗリスト★・ナンバーレス・部分ナンバーレス・ウルトラ・変則・矢印があります。<br />
+                網掛け画面を使うことで、「超」タイプを組み合わせることができます。
+              </p>
+              <p style={{ marginBottom: '12px' }}><strong>小メニューエリア</strong>には「設定」「サイズ変更」「印刷」のボタンがあります</p>
+              <p>
+                <strong>単語リストエリア</strong>ではリストの編集が行えます。<br />
+                ナンバーレス、部分ナンバーレス選択時はリストをドラッグすることで、リストの移動が可能です。<br />
+                Ｗリスト・Ｗリスト★選択時はリスト2の編集が行えます
+              </p>
+            </div>
+
+            <div className="help-section">
+              <h4>＜盤面エリア＞</h4>
+              <p style={{ marginBottom: '12px' }}>上からタイトル・解答欄・盤面・タグの4つのエリアがあります</p>
+              <ul style={{ listStyle: 'none', paddingLeft: 0 }}>
+                <li style={{ marginBottom: '8px' }}><strong>タイトル</strong>　タイトルを直接入力できます。</li>
+                <li style={{ marginBottom: '8px' }}><strong>解答欄</strong>　盤面にアルファベットを入力することで自動的に解答マスが出現します。「スペース編集」ボタンは解答を分離するために使います。</li>
+                <li style={{ marginBottom: '8px' }}><strong>盤面</strong>　網掛け・問題面・解答面の盤面選択によって表示が変わり、編集できる内容も変わります。「問題作成」「解答作成」をご覧ください。</li>
+                <li><strong>タグ</strong>　問題ごとに、タグの設定ができます。読み込み時に役に立ちます。</li>
+              </ul>
             </div>
           </div>
         );
       case 'edit':
         return (
           <div className="help-content animate-fade-in">
-            <h3>問題作成（盤面の編集）</h3>
+            <h3>問題作成</h3>
 
             <div className="help-section">
-              <h4>問題面での操作</h4>
-              <ul>
-                <li><strong>番号の配置</strong>: マスをクリックすると、左上から自動的に1, 2, 3...と番号が振られます。</li>
-                <li><strong>大マスの入力</strong>: マスをドラッグすると、大マスを作ることができます。大マスを解除するときは、右クリックで開いたメニューの「大マスの解除」から行えます。</li>
-                <li><strong>解答マスの入力</strong>: 解答にしたいマスで右クリックすると、アルファベットが入力できます。一度入力したアルファベットを削除するときも、右クリックから行います。</li>
-                <li><strong>単語リスト</strong>: 番号入力後は、左側エリアにリストの入力欄が現れます。ここでリストの言葉を入力します。リストを入力すると、盤面に自動的に1文字目が入力されます。</li>
-              </ul>
+              <h4>【新規作成】</h4>
+              <p>メニューエリアの「＋新規作成」ボタンを押して、サイズを入力します。</p>
             </div>
 
             <div className="help-section">
-              <h4>便利なショートカット</h4>
-              <p>盤面上でマスを<strong>ドラッグ</strong>すると、連続して壁を配置したり、範囲選択を行ったりできます。</p>
+              <h4>【ジャンル選択】</h4>
+              <p>リストエリア上部のドロップダウンリストよりジャンルを選択します。<br />通常の問題なら「ノーマル」のままです。</p>
+            </div>
+
+            <div className="help-section">
+              <h4>【タイトル設定】</h4>
+              <p>盤面エリア最上部にタイトルを入力してください。<br />適宜、タグの設定もするといいでしょう。</p>
+            </div>
+
+            <div className="help-section">
+              <h4>【盤面編集】</h4>
+
+              <div style={{ marginBottom: '16px' }}>
+                <strong style={{ display: 'block', marginBottom: '4px' }}>＜数字マス入力＞</strong>
+                <p>盤面で数字のマスをクリックします。左上から自動的に数字が入力されます。</p>
+              </div>
+
+              <div style={{ marginBottom: '16px' }}>
+                <strong style={{ display: 'block', marginBottom: '4px' }}>＜解答マス入力＞</strong>
+                <p>該当のマスで右クリックするとアルファベット入力チップが出現します。<br />解答マスの設定をすると、盤面の上に解答欄が出現します。</p>
+              </div>
+
+              <div style={{ marginBottom: '16px' }}>
+                <strong style={{ display: 'block', marginBottom: '4px' }}>＜ヒント文字入力＞</strong>
+                <p>
+                  ウルトラなど、一部の問題では盤面に数字のない文字（ヒント文字）が必要なものがあります。<br />
+                  盤面を一度クリックすると数字マスになりますが、もう一度クリックすると文字が入力できるマスになります。キーボードから入力するか、ペーストして文字を入力します。<br />
+                  2文字以上入力できますが、そのときはバックスペースで後ろから1文字ずつ削除できます。
+                </p>
+              </div>
+
+              <div style={{ marginBottom: '16px' }}>
+                <strong style={{ display: 'block', marginBottom: '4px' }}>＜網掛け編集＞</strong>
+                <p>
+                  超・Ｗリスト問題など網掛けの入力が必要な問題では、「単語リストエリア」の最上部の「網掛け」ボタンを押します。<br />
+                  網掛け画面にしたら、盤面をクリックすることで網掛けの入力・削除ができます。ドラッグすることで、連続入力もできます。
+                </p>
+              </div>
+
+              <div style={{ marginBottom: '16px' }}>
+                <strong style={{ display: 'block', marginBottom: '4px' }}>＜大マス入力＞</strong>
+                <p>
+                  「単語リストエリア」最上部の「問題面」ボタンを押し、画面選択した後、盤面をドラッグすることで大マスの入力ができます。<br />
+                  大マスの解消は、大マスの上で右クリックすると出現するアルファベット入力チップの「大マスの解除」で解除できます。
+                </p>
+              </div>
+
+              <div style={{ marginBottom: '16px' }}>
+                <strong style={{ display: 'block', marginBottom: '4px' }}>＜単語リスト編集＞</strong>
+                <p>
+                  盤面に数字マスを入力していくと、「単語リストエリア」に単語リスト入力枠が増えていきます。<br />
+                  この枠に、単語を入力すると、1文字目が自動的に盤面に表示されます。
+                </p>
+              </div>
+
+              <div style={{ marginBottom: '16px' }}>
+                <strong style={{ display: 'block', marginBottom: '4px' }}>＜各問題の編集＞</strong>
+                <p>「特殊ジャンル」をご覧ください。</p>
+              </div>
             </div>
           </div>
         );
       case 'answer':
         return (
           <div className="help-content animate-fade-in">
-            <h3>解答作成（トレース入力）</h3>
-            <div className="help-image-container">
-              <img src="/help/answer_mode.png" alt="解答入力" style={{ width: '100%', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-            </div>
+            <h3>解答作成</h3>
 
             <div className="help-section">
-              <h4>解答モードへの切り替え</h4>
-              <p>画面左上のモード切替で「解答入力」を選択します。</p>
+              <p>リストエリア最上部のモード切替で「解答面」を選択します。</p>
               <ul>
-                <li><strong>ドラッグで入力</strong>: 数字のマスから、単語の通りにマウスをドラッグしてください。文字が自動的に流し込まれます。</li>
-                <li><strong>浮遊パネル</strong>: ドラッグ中、カーソルのそばに現在入力中の単語が表示されます。これにより、次にどの文字を置くべきか一目でわかります。</li>
+                <li><strong>ドラッグで入力</strong>: 数字のマスから始めて、文字が入る順にマウスをドラッグしてください。文字が自動的にトレースして入力されます。</li>
                 <li><strong>1文字目の保護</strong>: 既に文字が入っている数字マスの上を通過しても、そのマスの文字は上書きされません。</li>
+                <li><strong>解答欄作成</strong>: ドラッグ中、解答マスに文字が入ると、自動的に解答欄に文字が入力されます。</li>
+                <li><strong>残るもの</strong>: Ｗリスト / Ｗリスト★でリスト2が余る解答出しがある場合は、解答欄のリストを選択します。</li>
+                <li><strong>完成チェック</strong>: 盤面が完成したら、成立しているかミスがないかを自動チェックできます。</li>
               </ul>
             </div>
           </div>
@@ -84,24 +184,59 @@ export const HelpDialog: React.FC<HelpDialogProps> = ({ onClose }) => {
         return (
           <div className="help-content animate-fade-in">
             <h3>様々なパズルジャンルへの対応</h3>
-            <p>設定ダイアログから、パズルの種類を変更することで、特殊なルールにも対応できます。</p>
+            <p>各種のジャンル問題の作成方法は以下の通りです。</p>
 
             <div className="help-grid">
               <div className="help-card">
+                <h5>”超”問題</h5>
+                <p>
+                  <strong>＜手順＞</strong><br />
+                  網掛け設定→盤面数字設定→リスト入力→解答面入力
+                </p>
+              </div>
+              <div className="help-card">
                 <h5>Wリスト / Wリスト★</h5>
-                <p>2つの単語リストを持つ形式です。★モードでは、特定の番号にリスト2から単語が入る設定が可能です。</p>
+                <p style={{ marginBottom: '8px' }}>
+                  Wリスト、もしくはWリスト★を選択するとリスト2の入力欄が現れます。<br />
+                  リスト余りの解答出し設定が可能です。<br />
+                  Wリストでは網掛け画面で網掛けの設定をします。<br />
+                  Wリスト★ではリストで★スイッチをオンにすることで、★のリストを選択できます。
+                </p>
+                <p>
+                  <strong>＜手順＞</strong><br />
+                  （網掛け設定）→盤面数字設定→リスト入力（★設定）→リスト2入力→解答面入力
+                </p>
               </div>
               <div className="help-card">
-                <h5>ナンバーレス</h5>
-                <p>盤面に番号を表示しない難易度の高い形式です。内部的には番号で管理されますが、出力時に番号を消すことができます。</p>
+                <h5>ナンバーレス / 部分ナンバーレス</h5>
+                <p style={{ marginBottom: '8px' }}>部分ナンバーレスの場合は、数字付きのリストは×をクリックすると◎に変わり、そのリストは数字付き（ナンバーレスではないリスト）になります。</p>
+                <p>
+                  <strong>＜手順＞</strong><br />
+                  盤面数字設定→リスト入力（◎設定）→リストを五十音順並び替え→解答面入力
+                </p>
               </div>
               <div className="help-card">
-                <h5>矢印モード</h5>
-                <p>リストに「2文字目への方向」を示す矢印を表示するモードです。入力時に方向を検証できます。</p>
+                <h5>ウルトラ</h5>
+                <p style={{ marginBottom: '8px' }}>通常の問題作成とほぼ同じ手順です。</p>
+                <p>
+                  <strong>＜手順＞</strong><br />
+                  盤面数字設定・ヒント文字入力→リスト入力→解答面入力→数字非表示で問題面確認
+                </p>
               </div>
               <div className="help-card">
-                <h5>「超」問題</h5>
-                <p>盤面に網掛け（グレーのマス）を配置し、そこに入る文字を特定させる形式です。「網掛け」設定から出力可能です。</p>
+                <h5>変則</h5>
+                <p style={{ marginBottom: '8px' }}>通常の問題作成とまったく同じ手順で行います。</p>
+                <p>
+                  <strong>＜手順＞</strong><br />
+                  盤面数字設定→リスト入力→解答面入力→変則数字表示で問題面確認
+                </p>
+              </div>
+              <div className="help-card">
+                <h5>矢印</h5>
+                <p>
+                  <strong>＜手順＞</strong><br />
+                  盤面数字設定→リスト入力（矢印入力）→解答面入力
+                </p>
               </div>
             </div>
           </div>
@@ -110,30 +245,23 @@ export const HelpDialog: React.FC<HelpDialogProps> = ({ onClose }) => {
         return (
           <div className="help-content animate-fade-in">
             <h3>Excel出力の設定</h3>
-            <p>完成したパズルは、出版原稿としてそのまま使える品質でExcel出力されます。</p>
-
-            <div className="help-image-container">
-              <img src="/help/excel_settings.png" alt="Excel設定" style={{ width: '100%', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
-            </div>
+            <p>完成したパズルは、原稿としてそのまま納品できる品質でExcel出力されます。</p>
 
             <div className="help-section">
               <h4>主な設定項目</h4>
               <ul>
-                <li><strong>出力モード</strong>: 「網掛け」のあり・なしを選択できます。</li>
                 <li><strong>マス設定</strong>: 1マスをExcelの何セル分（1x1, 2x1, 3x3）で描画するか選べます。</li>
-                <li><strong>解答欄の有無</strong>: アルファベットキー（A, B, C...）に対応した解答欄を出力します。</li>
+                <li><strong>フォント設定</strong>: フォントの選択やサイズ指定ができます。</li>
+                <li><strong>リスト設定</strong>: リストの位置または単独シートを設定できます。</li>
               </ul>
             </div>
 
-            <div className="help-tip">
-              <p><strong>ヒント</strong>: 解答面では、自動的にアルファベットのマスが15%グレーで着色され、解答文字が14ptの大きさで見やすく配置されます。</p>
-            </div>
           </div>
         );
-      case 'contact':
+      case 'security':
         return (
           <div className="help-content animate-fade-in">
-            <h3>お問い合わせ他</h3>
+            <h3>セキュリティとプライバシー</h3>
             <div className="help-section">
               <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginBottom: '24px' }}>
                 <section style={{ display: 'flex', gap: '12px' }}>
@@ -157,6 +285,11 @@ export const HelpDialog: React.FC<HelpDialogProps> = ({ onClose }) => {
                 </section>
               </div>
             </div>
+          </div>
+        );
+      case 'contact':
+        return (
+          <div className="help-content animate-fade-in">
             <div className="help-section">
               <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
                 <Mail size={20} style={{ color: '#6366f1', flexShrink: 0, marginTop: '4px' }} />

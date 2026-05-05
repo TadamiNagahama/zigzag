@@ -311,6 +311,35 @@ function App() {
     });
     return () => unsubscribe();
   }, []);
+  
+  const isPuzzleModified = useMemo(() => {
+    // 1. 盤面のチェック
+    const hasAnyCellEdit = puzzle.cells.some(row => row.some(cell => 
+      cell.type !== 'normal' || 
+      cell.char !== '' || 
+      cell.answerChar !== '' || 
+      cell.isNumbered || 
+      cell.isShaded ||
+      cell.mergedParent ||
+      cell.answerKey !== null
+    ));
+    if (hasAnyCellEdit) return true;
+
+    // 2. 単語リストのチェック
+    const hasAnyWord = Object.values(puzzle.wordList).some(w => w && w.trim() !== '');
+    if (hasAnyWord) return true;
+
+    const hasAnyWord2 = puzzle.wordList2?.some(w => w && w.trim() !== '');
+    if (hasAnyWord2) return true;
+
+    // 3. その他メタデータのチェック
+    if (puzzle.title !== '無題のパズル' && puzzle.title !== '') return true;
+    if (puzzle.tags && puzzle.tags.length > 0) return true;
+    if (puzzle.answerColumnSpaces && puzzle.answerColumnSpaces.length > 0) return true;
+    if (puzzle.remainingAnswerWord && puzzle.remainingAnswerWord.trim() !== '') return true;
+
+    return false;
+  }, [puzzle]);
 
   const handleLogin = async () => {
     try {
@@ -458,17 +487,23 @@ function App() {
   };
 
   const handleLoadConfirm = (p: PuzzleData) => {
-    setConfirmAction({
-      message: `「${p.title}」を読み込みますか？\n現在の編集内容は破棄されます。`,
-      isDestructive: true,
-      onConfirm: () => {
-        const normalized = normalizePuzzle(p);
-        reset(normalized);
-        fitToScreen();
-        setShowLoadDialog(false);
-        setConfirmAction(null);
-      }
-    });
+    const applyLoad = () => {
+      const normalized = normalizePuzzle(p);
+      reset(normalized);
+      fitToScreen();
+      setShowLoadDialog(false);
+      setConfirmAction(null);
+    };
+
+    if (isPuzzleModified) {
+      setConfirmAction({
+        message: `「${p.title}」を読み込みますか？\n現在の編集内容は破棄されます。`,
+        isDestructive: true,
+        onConfirm: applyLoad
+      });
+    } else {
+      applyLoad();
+    }
   };
 
   const handleDeleteCloudPuzzle = async (firebaseId: string) => {
@@ -482,24 +517,26 @@ function App() {
   };
 
   const handleNew = () => {
-    setConfirmAction({
-      message: '現在の内容を破棄して新規作成しますか？',
-      isDestructive: true,
-      onConfirm: () => {
-        setConfirmAction(null);
-        setShowSizeDialog(true);
-      }
-    });
+    setShowSizeDialog(true);
   }
 
   const handleNewBoard = (h: number, w: number) => {
-    // usePuzzleにcreateNewBoardを追加したはずだが、もしなければresizeBoardで代用
-    // ただしrevertedApp.tsxではcreateNewBoardがdestructuredに含まれていない可能性がある
-    // 前のターンのusePuzzle.tsにはcreateNewBoardがあることを確認済み
-    // なので App() の destructure に追加する必要がある
-    createNewBoard(h, w);
-    setShowSizeDialog(false);
-    fitToScreen();
+    const applyNew = () => {
+      createNewBoard(h, w);
+      setShowSizeDialog(false);
+      fitToScreen();
+      setConfirmAction(null);
+    };
+
+    if (isPuzzleModified) {
+      setConfirmAction({
+        message: '現在の内容を破棄してよろしいですか？',
+        isDestructive: true,
+        onConfirm: applyNew
+      });
+    } else {
+      applyNew();
+    }
   }
 
   const handleCellClick = (x: number, y: number) => {
@@ -1246,7 +1283,7 @@ function App() {
                 <select
                   value={puzzle.puzzleType || 'ノーマル'}
                   onChange={(e) => setPuzzleType(e.target.value as any)}
-                  style={{ flex: 2, padding: '6px', fontSize: '0.85rem', borderRadius: '4px', border: '1px solid var(--border-color)', backgroundColor: 'white', cursor: 'pointer' }}
+                  style={{ width: '66.6%', padding: '6px', fontSize: '0.85rem', borderRadius: '4px', border: '1px solid var(--border-color)', backgroundColor: 'white', cursor: 'pointer' }}
                 >
                   <option value="ノーマル">ノーマル</option>
                   <option value="Wリスト">Wリスト</option>
@@ -1827,7 +1864,7 @@ function App() {
           onSetFontWeight={setBoardFontWeight}
           onSetFontFamily={setBoardFontFamily}
           onSetCloudAutoSave={setCloudAutoSave}
-          version="0.0.1"
+          version="1.0.0"
         />
       )}
 

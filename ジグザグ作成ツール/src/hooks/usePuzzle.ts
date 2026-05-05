@@ -386,6 +386,8 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
   const setPuzzleType = useCallback((puzzleType: PuzzleType) => {
     push(prev => {
       const result = recomputeNumbers(prev.cells, prev.wordList, prev.wordDirections, prev.wordStarList, puzzleType, prev.publicNumbers);
+      const isWListRelated = puzzleType === 'Wリスト' || puzzleType === 'Wリスト★';
+      
       return {
         ...prev,
         ...result,
@@ -393,6 +395,8 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
         isWList: puzzleType === 'Wリスト',
         isWListStar: puzzleType === 'Wリスト★',
         isArrowMode: puzzleType === '矢印',
+        isRemainingAnswer: isWListRelated ? prev.isRemainingAnswer : false,
+        remainingAnswerWord: isWListRelated ? prev.remainingAnswerWord : '',
         customAlphabeticalOrder: syncOrder(prev.customAlphabeticalOrder, result.numbers),
         updatedAt: Date.now()
       };

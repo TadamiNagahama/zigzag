@@ -40,7 +40,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   onSetFontWeight,
   onSetFontFamily,
   onSetCloudAutoSave,
-  version = '0.0.1'
+  version = '1.0.0'
 }) => {
   return (
     <div className="modal-overlay" style={{ zIndex: 3000 }}>

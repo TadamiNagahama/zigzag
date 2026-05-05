@@ -20,8 +20,6 @@ export interface ExportOptions {
   fontSizeSmall: number;
   fontSizeLarge: number;
   listFontSize: number;
-  // 超モード関連
-  exportMode: 'normal' | 'super';
   superLayout: 'separate' | 'single';
 }
 
@@ -47,7 +45,6 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ initialOptions, hasS
     fontSizeSmall: 10,
     fontSizeLarge: 14,
     listFontSize: 11,
-    exportMode: hasShadedCells ? 'super' : 'normal',
     superLayout: 'separate',
     ...initialOptions
   });
@@ -155,30 +152,6 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ initialOptions, hasS
         <h3 style={{ marginBottom: '20px', borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }}>Excel出力設定</h3>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          {/* 出力タイプの設定（超モード対応） */}
-          <section>
-            <h4 style={{ fontSize: '0.9rem', color: 'var(--primary-color)', marginBottom: '10px' }}>【網掛け】</h4>
-            <div style={{ display: 'flex', gap: '20px', paddingLeft: '10px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                <input
-                  type="radio"
-                  name="exportMode"
-                  checked={options.exportMode === 'normal'}
-                  onChange={() => setOptions({ ...options, exportMode: 'normal' })}
-                />
-                なし
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                <input
-                  type="radio"
-                  name="exportMode"
-                  checked={options.exportMode === 'super'}
-                  onChange={() => setOptions({ ...options, exportMode: 'super' })}
-                />
-                あり
-              </label>
-            </div>
-          </section>
 
           {/* 盤面の設定 */}
           <section>
@@ -489,7 +462,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ initialOptions, hasS
           </section>
 
           {/* 「超」モード専用レイアウト設定 */}
-          {options.exportMode === 'super' && (
+          {hasShadedCells && (
             <section style={{ borderTop: '2px solid var(--primary-light)', paddingTop: '15px', marginTop: '10px' }}>
               <h4 style={{ fontSize: '0.9rem', color: 'var(--primary-color)', marginBottom: '10px' }}>【「超」問題のレイアウト】</h4>
               <div style={{ display: 'flex', gap: '20px', paddingLeft: '10px' }}>
