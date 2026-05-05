@@ -9,6 +9,67 @@ const pxToChars = (px: number) => Math.max(0, (px - 5) / 8); // ピクセル数�
 
 
 /**
+ * 変則モード用の共有マス計算ロジック (Excel出力用)
+ */
+const calculateSharedCells = (puzzle: PuzzleData): Record<string, number[]> => {
+  const sharedCellsMap: Record<string, number[]> = {};
+  const usedNumbers = new Set<number>();
+  puzzle.cells.forEach(row => row.forEach(cell => {
+    if (cell.number !== null) usedNumbers.add(cell.number);
+  }));
+
+  const findAllPaths = (word: string, x: number, y: number, visited: Set<string>, currentPath: { x: number, y: number }[]): { x: number, y: number }[][] => {
+    if (x < 0 || x >= puzzle.width || y < 0 || y >= puzzle.height) return [];
+    const cell = puzzle.cells[y][x];
+    const currentChar = cell.char || cell.answerChar;
+    if (cell.type !== 'normal' || currentChar !== word[0]) return [];
+    const key = `${x},${y}`;
+    if (visited.has(key)) return [];
+    const newPath = [...currentPath, { x, y }];
+    if (word.length === 1) return [newPath];
+    const newVisited = new Set(visited);
+    newVisited.add(key);
+    const res: { x: number, y: number }[][] = [];
+    for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+      const sub = findAllPaths(word.slice(1), x + dx, y + dy, newVisited, newPath);
+      res.push(...sub);
+      if (res.length >= 2) break;
+    }
+    return res;
+  };
+
+  for (const num of Array.from(usedNumbers)) {
+    const word = puzzle.wordList[num];
+    if (!word) continue;
+    let startPos: { x: number, y: number } | null = null;
+    for (let y = 0; y < puzzle.height; y++) {
+      for (let x = 0; x < puzzle.width; x++) {
+        if (puzzle.cells[y][x].number === num) {
+          startPos = { x, y };
+          break;
+        }
+      }
+      if (startPos) break;
+    }
+    if (!startPos) continue;
+    const paths = findAllPaths(word, startPos.x, startPos.y, new Set(), []);
+    if (paths.length === 1) {
+      paths[0].forEach(p => {
+        const k = `${p.x},${p.y}`;
+        if (!sharedCellsMap[k]) sharedCellsMap[k] = [];
+        if (!sharedCellsMap[k].includes(num)) sharedCellsMap[k].push(num);
+      });
+    }
+  }
+
+  const finalMap: Record<string, number[]> = {};
+  Object.entries(sharedCellsMap).forEach(([k, nums]) => {
+    if (nums.length >= 2) finalMap[k] = nums.sort((a, b) => a - b);
+  });
+  return finalMap;
+};
+
+/**
  * 指定されたワークシートにパズルの一式を描画する内部関数
  */
 const renderPuzzleSection = (
@@ -167,6 +228,10 @@ const renderPuzzleSection = (
     bgColor: { argb: 'FFD9D9D9' }  // 背景は網掛けのグレー
   };
 
+  // 変則モードの共有マス情報を事前に計算 (ジャンルが変則なら常に計算)
+  const isIrregularViewForBoard = isQuestion && puzzle.puzzleType === '変則';
+  const sharedMap = isIrregularViewForBoard ? calculateSharedCells(puzzle) : {};
+
   for (let py = 0; py < puzzle.height; py++) {
     for (let px = 0; px < puzzle.width; px++) {
       const cell = puzzle.cells[py][px];
@@ -213,10 +278,15 @@ const renderPuzzleSection = (
       // 内容の描画
       const hideContent = isQuestion && cell.isShaded;
       const isUltraQuestion = isQuestion && puzzle.puzzleType === 'ウルトラ';
-      const num = (!hideContent && cell.isNumbered && puzzle.puzzleType !== 'ナンバーレス' && !isUltraQuestion) ? cell.number : null;
-      const hintChar = (!hideContent && cell.char && !(isUltraQuestion && cell.isNumbered)) ? cell.char : '';
+      const isIrregularQuestion = isQuestion && puzzle.puzzleType === '変則';
+      
+      const num = (!hideContent && cell.isNumbered && puzzle.puzzleType !== 'ナンバーレス' && !isUltraQuestion && !isIrregularQuestion) ? cell.number : null;
+      const hintChar = (!hideContent && cell.char && !(isUltraQuestion && cell.isNumbered) && !isIrregularQuestion) ? cell.char : '';
       const answerChar = (!hideContent && !isQuestion && cell.answerChar) ? cell.answerChar : '';
       const alpha = cell.answerKey || ''; // アルファベット（解答キー）は常に表示
+
+      // 変則モードの共有数字
+      const sharedNums = isIrregularQuestion ? sharedMap[`${cell.x},${cell.y}`] : null;
 
       if (options.boardCellMode === '1x1') {
         worksheet.getRow(ey).height = pxToPoints(options.cellHeight1);
@@ -227,6 +297,10 @@ const renderPuzzleSection = (
           if (val && options.boardNewline) val += '\n';
           else if (val) val += ' ';
           val += displayChar;
+        }
+        if (sharedNums) {
+          if (val) val += ' ';
+          val += sharedNums.join('・');
         }
         if (alpha) {
           if (val) val += ' ';
@@ -261,6 +335,10 @@ const renderPuzzleSection = (
           alphaCell.value = (alphaCell.value ? alphaCell.value + ' ' : '') + alpha;
           alphaCell.font = { name: defaultFontName, size: options.fontSizeSmall };
         }
+        if (sharedNums) {
+          topCell.value = sharedNums.join('・');
+          topCell.font = { name: defaultFontName, size: options.fontSizeSmall, bold: true };
+        }
         topCell.alignment = { vertical: 'middle', horizontal: 'left', shrinkToFit: true };
         bottomCell.alignment = { vertical: 'middle', horizontal: 'center', shrinkToFit: true };
       } else {
@@ -276,6 +354,11 @@ const renderPuzzleSection = (
           cCell.value = answerChar || hintChar;
           cCell.font = { name: defaultFontName, size: options.fontSizeLarge, bold: isBold };
           cCell.alignment = { vertical: 'middle', horizontal: 'center', shrinkToFit: true };
+        } else if (sharedNums) {
+          const sCell = worksheet.getCell(ey, ex);
+          sCell.value = sharedNums.join('・');
+          sCell.font = { name: defaultFontName, size: options.fontSizeSmall, bold: true };
+          sCell.alignment = { vertical: 'top', horizontal: 'left', shrinkToFit: true };
         }
         if (alpha) {
           const aCell = worksheet.getCell(ey + 2, ex + 2);

@@ -18,9 +18,11 @@ interface GridProps {
   boardFontWeight?: 'normal' | 'bold';
   boardFontFamily?: string;
   isNumbersHidden?: boolean;
+  isIrregularNumbersDisplay?: boolean;
+  sharedCells?: Record<string, number[]>;
 }
 
-export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick, onDragSelection, onDragPath, cellSize = 40, appMode = 'edit', focusedCell = null, composingText = '', shadingColor = '#e2e8f0', wordList = {}, boardFontWeight = 'normal', boardFontFamily = '', isNumbersHidden = false }) => {
+export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick, onDragSelection, onDragPath, cellSize = 40, appMode = 'edit', focusedCell = null, composingText = '', shadingColor = '#e2e8f0', wordList = {}, boardFontWeight = 'normal', boardFontFamily = '', isNumbersHidden = false, isIrregularNumbersDisplay = false, sharedCells = {} }) => {
   const [dragStart, setDragStart] = useState<{ x: number, y: number } | null>(null);
   const [dragPath, setDragPath] = useState<{ x: number, y: number }[]>([]);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
@@ -167,10 +169,29 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick
                   color: 'var(--text-main)',
                   fontWeight: 'bold',
                   zIndex: 3,
-                  display: ((appMode === 'shade' && cell.isShaded) || isNumbersHidden) ? 'none' : 'block'
+                  display: ((appMode === 'shade' && cell.isShaded) || isNumbersHidden || isIrregularNumbersDisplay) ? 'none' : 'block'
                 }}>
                   {cell.number}
                 </span>
+              )}
+
+              {/* Layer 3.5: 変則モードの共有数字 */}
+              {isIrregularNumbersDisplay && sharedCells[`${cell.x},${cell.y}`] && (
+                <div style={{
+                  position: 'absolute',
+                  top: '1px',
+                  left: '1px',
+                  fontSize: `${cellSize * 0.3}px`,
+                  lineHeight: '1',
+                  color: 'var(--text-main)',
+                  fontWeight: 'bold',
+                  zIndex: 4,
+                  pointerEvents: 'none',
+                  wordBreak: 'break-all',
+                  maxWidth: '100%'
+                }}>
+                  {sharedCells[`${cell.x},${cell.y}`].join('・')}
+                </div>
               )}
 
               {/* Layer 3 & 1: 文字データ (提示文字 or 解答文字) */}
@@ -183,7 +204,7 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick
                 opacity: (isFocused && composingText) ? 0.7 : 1,
                 zIndex: (appMode === 'shade' && cell.isShaded && cell.answerKey) ? 5 : 2,
                 position: 'relative',
-                display: (isNumbersHidden && cell.isNumbered) || (appMode === 'shade' && cell.isShaded && !cell.answerKey) ? 'none' : 'block'
+                display: (isNumbersHidden && cell.isNumbered) || (isIrregularNumbersDisplay && appMode !== 'answer') || (appMode === 'shade' && cell.isShaded && !cell.answerKey) ? 'none' : 'block'
               }}>
                 {(isFocused && composingText) 
                   ? composingText 

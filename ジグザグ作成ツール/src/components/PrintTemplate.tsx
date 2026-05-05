@@ -6,9 +6,10 @@ interface PrintTemplateProps {
   options: PrintOptions;
   alphabetGroups: string[][];
   answerChars: Record<string, string>;
+  sharedCells: Record<string, number[]>;
 }
 
-export const PrintTemplate: React.FC<PrintTemplateProps> = ({ puzzle, options, alphabetGroups, answerChars }) => {
+export const PrintTemplate: React.FC<PrintTemplateProps> = ({ puzzle, options, alphabetGroups, answerChars, sharedCells }) => {
   const shadingColor = puzzle.shadingColor || '#e2e8f0';
 
   const renderAnswerArea = (isAnswer: boolean) => {
@@ -74,6 +75,8 @@ export const PrintTemplate: React.FC<PrintTemplateProps> = ({ puzzle, options, a
     const containerWidth = 720;
     const cellSize = Math.floor(containerWidth / width);
 
+    const isIrregularView = !isAnswer && puzzle.puzzleType === '変則';
+
     return (
       <div style={{
         display: 'grid',
@@ -92,10 +95,11 @@ export const PrintTemplate: React.FC<PrintTemplateProps> = ({ puzzle, options, a
             const spanH = cell.mergedSize?.height || 1;
 
             const isShadedAndProblem = !isAnswer && cell.isShaded;
-            const showNumber = !isShadedAndProblem && cell.number;
-            const showChar = !isShadedAndProblem && (isAnswer ? (cell.answerChar || cell.char) : cell.char);
-            const showArrow = !isShadedAndProblem && puzzle.isArrowMode && puzzle.wordDirections?.[cell.number || 0] && puzzle.wordDirections[cell.number || 0] !== '?';
+            const showNumber = !isShadedAndProblem && cell.number && !isIrregularView;
+            const showChar = !isShadedAndProblem && (isAnswer ? (cell.answerChar || cell.char) : (isIrregularView ? '' : cell.char));
+            const showArrow = !isShadedAndProblem && puzzle.isArrowMode && puzzle.wordDirections?.[cell.number || 0] && puzzle.wordDirections[cell.number || 0] !== '?' && !isIrregularView;
             const showKey = !isShadedAndProblem && cell.answerKey;
+            const sharedNums = isIrregularView ? sharedCells[`${cell.x},${cell.y}`] : null;
 
             return (
               <div 
@@ -125,6 +129,22 @@ export const PrintTemplate: React.FC<PrintTemplateProps> = ({ puzzle, options, a
                     lineHeight: 1,
                     zIndex: 3
                   }}>{cell.number}</span>
+                )}
+                {sharedNums && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '0px',
+                    left: '1px',
+                    fontSize: `${cellSize * 0.3}px`,
+                    lineHeight: '1',
+                    fontWeight: 'bold',
+                    zIndex: 4,
+                    pointerEvents: 'none',
+                    wordBreak: 'break-all',
+                    maxWidth: '100%'
+                  }}>
+                    {sharedNums.join('・')}
+                  </div>
                 )}
                 {showChar && (
                   <span style={{

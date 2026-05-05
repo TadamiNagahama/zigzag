@@ -193,6 +193,15 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
     }));
   }, [push]);
 
+  // 変則数字表示トグル（変則モード用）
+  const toggleIrregularNumbersDisplay = useCallback(() => {
+    push(prev => ({
+      ...prev,
+      isIrregularNumbersDisplay: !prev.isIrregularNumbersDisplay,
+      updatedAt: Date.now()
+    }));
+  }, [push]);
+
   // 盤面サイズの変更
   const resizeBoard = useCallback((h: number, w: number) => {
     push(prev => {
@@ -643,5 +652,6 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
     createNewBoard,
     togglePublicNumber,
     toggleNumbersHidden,
+    toggleIrregularNumbersDisplay,
   };
 };

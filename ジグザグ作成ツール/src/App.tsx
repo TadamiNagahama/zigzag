@@ -27,6 +27,25 @@ type EditMode = 'number' | 'wall';
 
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
+const playBuzzer = () => {
+  const context = new (window.AudioContext || (window as any).webkitAudioContext)();
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+
+  oscillator.type = 'sawtooth';
+  oscillator.frequency.setValueAtTime(100, context.currentTime); // 低い音
+  oscillator.frequency.exponentialRampToValueAtTime(50, context.currentTime + 0.3);
+
+  gain.gain.setValueAtTime(0.1, context.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.01, context.currentTime + 0.3);
+
+  oscillator.connect(gain);
+  gain.connect(context.destination);
+
+  oscillator.start();
+  oscillator.stop(context.currentTime + 0.3);
+};
+
 function App() {
   const {
     puzzle,
@@ -63,7 +82,8 @@ function App() {
     reset,
     createNewBoard,
     togglePublicNumber,
-    toggleNumbersHidden
+    toggleNumbersHidden,
+    toggleIrregularNumbersDisplay,
   } = usePuzzle(17, 17);
 
   const [editMode, setEditMode] = useState<EditMode>('number');
@@ -73,6 +93,110 @@ function App() {
   const [printOptions, setPrintOptions] = useState<PrintOptions | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, cellX: number, cellY: number } | null>(null);
   const [zoom, setZoom] = useState(1);
+
+  // 変則モード用の共有マス計算ロジック
+  const irregularInfo = useMemo(() => {
+    if (puzzle.puzzleType !== '変則') return { sharedCells: {} as Record<string, number[]>, errors: [] as string[] };
+
+    const sharedCellsMap: Record<string, number[]> = {};
+    const errors: string[] = [];
+
+    // 使用されている番号を抽出
+    const usedNumbers = new Set<number>();
+    puzzle.cells.forEach(row => row.forEach(cell => {
+      if (cell.number !== null) usedNumbers.add(cell.number);
+    }));
+
+    // 経路探索（最大2つまで取得）
+    const findAllPaths = (word: string, x: number, y: number, visited: Set<string>, currentPath: { x: number, y: number }[]): { x: number, y: number }[][] => {
+      if (x < 0 || x >= puzzle.width || y < 0 || y >= puzzle.height) return [];
+      const cell = puzzle.cells[y][x];
+      const currentChar = cell.char || cell.answerChar;
+      if (cell.type !== 'normal' || currentChar !== word[0]) return [];
+
+      const key = `${x},${y}`;
+      if (visited.has(key)) return [];
+
+      const newPath = [...currentPath, { x, y }];
+      if (word.length === 1) return [newPath];
+
+      const newVisited = new Set(visited);
+      newVisited.add(key);
+
+      const res: { x: number, y: number }[][] = [];
+      for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+        const sub = findAllPaths(word.slice(1), x + dx, y + dy, newVisited, newPath);
+        res.push(...sub);
+        if (res.length >= 2) break;
+      }
+      return res;
+    };
+
+    // どこまで辿れたかを確認（エラーメッセージ用）
+    const getMaxDepth = (word: string, x: number, y: number, visited: Set<string>, depth: number): number => {
+      if (x < 0 || x >= puzzle.width || y < 0 || y >= puzzle.height) return depth;
+      const cell = puzzle.cells[y][x];
+      const currentChar = cell.char || cell.answerChar;
+      if (cell.type !== 'normal' || currentChar !== word[0]) return depth;
+
+      const key = `${x},${y}`;
+      if (visited.has(key)) return depth;
+
+      if (word.length === 1) return depth + 1;
+
+      const newVisited = new Set(visited);
+      newVisited.add(key);
+
+      let max = depth + 1;
+      for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+        max = Math.max(max, getMaxDepth(word.slice(1), x + dx, y + dy, newVisited, depth + 1));
+      }
+      return max;
+    };
+
+    for (const num of Array.from(usedNumbers).sort((a, b) => a - b)) {
+      const word = puzzle.wordList[num];
+      if (!word || word.trim() === '') continue;
+
+      let startPos: { x: number, y: number } | null = null;
+      for (let y = 0; y < puzzle.height; y++) {
+        for (let x = 0; x < puzzle.width; x++) {
+          if (puzzle.cells[y][x].number === num) {
+            startPos = { x, y };
+            break;
+          }
+        }
+        if (startPos) break;
+      }
+
+      if (!startPos) continue;
+
+      const paths = findAllPaths(word, startPos.x, startPos.y, new Set(), []);
+      if (paths.length === 0) {
+        const maxD = getMaxDepth(word, startPos.x, startPos.y, new Set(), 0);
+        errors.push(`リスト${num}の単語が全部見つかりません（${maxD + 1}文字目）`);
+      } else if (paths.length >= 2) {
+        errors.push(`リスト${num}の単語は2つ以上のルートが存在します`);
+      } else {
+        // 一意な経路が見つかった場合のみ、共有情報を記録
+        paths[0].forEach(p => {
+          const k = `${p.x},${p.y}`;
+          if (!sharedCellsMap[k]) sharedCellsMap[k] = [];
+          if (!sharedCellsMap[k].includes(num)) sharedCellsMap[k].push(num);
+        });
+      }
+    }
+
+    // 2つ以上の単語が通るマスのみを残す
+    const finalSharedCells: Record<string, number[]> = {};
+    Object.entries(sharedCellsMap).forEach(([k, nums]) => {
+      if (nums.length >= 2) {
+        finalSharedCells[k] = nums.sort((a, b) => a - b);
+      }
+    });
+
+    return { sharedCells: finalSharedCells, errors };
+  }, [puzzle]);
   const [pendingResize, setPendingResize] = useState<{ h: number, w: number } | null>(null);
   const editingWordRef = useRef<number | null>(null);
 
@@ -123,6 +247,13 @@ function App() {
   useEffect(() => {
     localStorage.setItem('zigzag_cloud_autosave_setting', cloudAutoSave.toString());
   }, [cloudAutoSave]);
+
+  // 解答面に遷移した際、変則数字表示を自動的にオフにする
+  useEffect(() => {
+    if (appMode === 'answer' && puzzle.isIrregularNumbersDisplay) {
+      toggleIrregularNumbersDisplay();
+    }
+  }, [appMode, puzzle.isIrregularNumbersDisplay, toggleIrregularNumbersDisplay]);
 
   // クラウドへの1分毎の自動保存処理
   useEffect(() => {
@@ -624,6 +755,11 @@ function App() {
       errors.push(errorMsg);
     }
 
+    // 変則モードの場合、パス探索エラーを最初に追加
+    if (puzzle.puzzleType === '変則') {
+      errors.push(...irregularInfo.errors);
+    }
+
     // 2. リスト充填チェック
     const usedNumbers = new Set<number>();
     puzzle.cells.forEach(row => row.forEach(cell => {
@@ -809,7 +945,7 @@ function App() {
               if (cell.number === num) { sx = x; sy = y; }
             }));
 
-            starFindings[num] = targetWords.filter(word => hasPath(word, sx, sy, new Set()));
+            starFindings[num] = targetWords.filter(word => countPaths(word, sx, sy, new Set()) > 0);
           });
 
           // 単純なマッチングチェック（1対1対応が必要）
@@ -842,7 +978,7 @@ function App() {
               puzzle.cells.forEach((row, y) => row.forEach((cell, x) => {
                 if (cell.number === num) { sx = x; sy = y; }
               }));
-              if (hasPath(puzzle.remainingAnswerWord, sx, sy, new Set())) {
+              if (countPaths(puzzle.remainingAnswerWord, sx, sy, new Set()) > 0) {
                 foundAtStar = true;
                 break;
               }
@@ -1126,7 +1262,43 @@ function App() {
                     数字非表示
                   </button>
                 )}
+
+                {puzzle.puzzleType === '変則' && (
+                  <button
+                    className={puzzle.isIrregularNumbersDisplay ? 'btn-primary' : 'btn-secondary'}
+                    style={{ flex: 1, fontSize: '0.8rem', padding: '6px 4px', height: '34px', whiteSpace: 'nowrap' }}
+                    onClick={() => {
+                      if (appMode === 'answer') {
+                        playBuzzer();
+                        return;
+                      }
+                      toggleIrregularNumbersDisplay();
+                    }}
+                  >
+                    変則数字表示
+                  </button>
+                )}
               </div>
+
+              {/* 変則モードのエラー表示 */}
+              {puzzle.puzzleType === '変則' && puzzle.isIrregularNumbersDisplay && irregularInfo.errors.length > 0 && (
+                <div style={{ 
+                  marginBottom: '16px', 
+                  padding: '8px', 
+                  backgroundColor: '#fef2f2', 
+                  border: '1px solid #fee2e2', 
+                  borderRadius: '4px',
+                  fontSize: '0.75rem',
+                  color: '#dc2626'
+                }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>共有マスの計算エラー:</div>
+                  <ul style={{ margin: 0, paddingLeft: '16px' }}>
+                    {irregularInfo.errors.map((err, i) => (
+                      <li key={i}>{err}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               <div className="hide-on-mobile" style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '16px' }}>
                 <button
@@ -1512,6 +1684,8 @@ function App() {
                     boardFontWeight={puzzle.boardFontWeight || 'normal'}
                     boardFontFamily={puzzle.boardFontFamily || ''}
                     isNumbersHidden={puzzle.isNumbersHidden}
+                    isIrregularNumbersDisplay={puzzle.isIrregularNumbersDisplay}
+                    sharedCells={irregularInfo.sharedCells}
                   />
                 </div>
               </div>
@@ -1661,6 +1835,7 @@ function App() {
           options={printOptions}
           alphabetGroups={alphabetGroups}
           answerChars={answerChars}
+          sharedCells={irregularInfo.sharedCells}
         />
       )}
 

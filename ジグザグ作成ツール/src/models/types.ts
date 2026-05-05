@@ -50,6 +50,7 @@ export interface PuzzleData {
   wordListOrderMode?: 'numerical' | 'alphabetical'; // 現在の表示モード
   publicNumbers?: Record<number, boolean>; // 番号 -> 公開フラグ（部分ナンバーレス用）
   isNumbersHidden?: boolean; // 数字非表示（ウルトラモード用）
+  isIrregularNumbersDisplay?: boolean; // 変則数字表示（変則モード用）
 
   updatedAt: number;
 }
