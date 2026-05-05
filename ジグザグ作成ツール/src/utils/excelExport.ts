@@ -100,7 +100,11 @@ const renderPuzzleSection = (
     for (let i = 1; i < uniqueSorted.length; i++) {
       const prevChar = uniqueSorted[i - 1];
       const currChar = uniqueSorted[i];
-      if (currChar.charCodeAt(0) === prevChar.charCodeAt(0) + 1) {
+      
+      const isConsecutive = currChar.charCodeAt(0) === prevChar.charCodeAt(0) + 1;
+      const hasSpace = (puzzle.answerColumnSpaces || []).includes(prevChar);
+
+      if (isConsecutive && !hasSpace) {
         currentGroup.push(currChar);
       } else {
         alphabetGroups.push(currentGroup);
@@ -116,7 +120,9 @@ const renderPuzzleSection = (
   // 1. タイトル
   const displayTitle = (puzzle.boardTitle || puzzle.title || '無題のパズル') + (isQuestion ? '' : '（解答）');
   const titleRow = startRow;
-  const boardWidth = Math.max(alphabetGroups.reduce((acc, g) => acc + g.length, 0), puzzle.width * colStep);
+  const totalGaps = alphabetGroups.length > 0 ? alphabetGroups.length - 1 : 0;
+  const answerColumnWidth = alphabetGroups.reduce((acc, g) => acc + g.length, 0) + totalGaps;
+  const boardWidth = Math.max(answerColumnWidth, puzzle.width * colStep);
   
   if (boardWidth > 1) {
     worksheet.mergeCells(titleRow, 1, titleRow, boardWidth);
@@ -140,7 +146,10 @@ const renderPuzzleSection = (
     answerLabelCell.value = '解答欄';
     answerLabelCell.font = { ...defaultFont, bold: true };
   }
-  alphabetGroups.forEach((group) => {
+  alphabetGroups.forEach((group, gIdx) => {
+    if (gIdx > 0) {
+      answerColOffset++; // グループ間にスペースを空ける
+    }
     group.forEach((alphabet) => {
       const col = 2 + answerColOffset;
       answerColOffset++;

@@ -468,6 +468,16 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
     });
   }, [push]);
 
+  const toggleAnswerColumnSpace = useCallback((char: string) => {
+    push(prev => {
+      const currentSpaces = prev.answerColumnSpaces || [];
+      const newSpaces = currentSpaces.includes(char)
+        ? currentSpaces.filter(c => c !== char)
+        : [...currentSpaces, char];
+      return { ...prev, answerColumnSpaces: newSpaces, updatedAt: Date.now() };
+    });
+  }, [push]);
+
   const setShadingColor = useCallback((shadingColor: string) => {
     push(prev => ({ ...prev, shadingColor, updatedAt: Date.now() }));
   }, [push]);
@@ -653,5 +663,6 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
     togglePublicNumber,
     toggleNumbersHidden,
     toggleIrregularNumbersDisplay,
+    toggleAnswerColumnSpace,
   };
 };

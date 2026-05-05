@@ -84,6 +84,7 @@ function App() {
     togglePublicNumber,
     toggleNumbersHidden,
     toggleIrregularNumbersDisplay,
+    toggleAnswerColumnSpace,
   } = usePuzzle(17, 17);
 
   const [editMode, setEditMode] = useState<EditMode>('number');
@@ -215,6 +216,7 @@ function App() {
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [showSizeDialog, setShowSizeDialog] = useState(false);
   const [showTagDialog, setShowTagDialog] = useState(false);
+  const [isEditingSpaces, setIsEditingSpaces] = useState(false);
   const [showHelpDialog, setShowHelpDialog] = useState(false);
   const [showWelcomeDialog, setShowWelcomeDialog] = useState(false);
   const [activeMobileTab, setActiveMobileTab] = useState<'board' | 'list'>('board');
@@ -1137,7 +1139,11 @@ function App() {
     for (let i = 1; i < uniqueSorted.length; i++) {
       const prevChar = uniqueSorted[i - 1];
       const currChar = uniqueSorted[i];
-      if (currChar.charCodeAt(0) === prevChar.charCodeAt(0) + 1) {
+      
+      const isConsecutive = currChar.charCodeAt(0) === prevChar.charCodeAt(0) + 1;
+      const hasSpace = (puzzle.answerColumnSpaces || []).includes(prevChar);
+
+      if (isConsecutive && !hasSpace) {
         currentGroup.push(currChar);
       } else {
         groups.push(currentGroup);
@@ -1146,7 +1152,7 @@ function App() {
     }
     groups.push(currentGroup);
     return groups;
-  }, [puzzle.cells]);
+  }, [puzzle.cells, puzzle.answerColumnSpaces]);
 
   const hasShadedCells = useMemo(() => {
     return puzzle.cells.some(row => row.some(cell => cell.isShaded));
@@ -1667,6 +1673,10 @@ function App() {
                   remainingAnswerWord={appMode === 'answer' ? (puzzle.remainingAnswerWord || '') : ''}
                   list2={puzzle.wordList2 || []}
                   onSelectRemaining={setRemainingAnswerWord}
+                  isEditingSpaces={isEditingSpaces}
+                  answerColumnSpaces={puzzle.answerColumnSpaces}
+                  onToggleSpace={toggleAnswerColumnSpace}
+                  onToggleEditing={() => setIsEditingSpaces(!isEditingSpaces)}
                 />
                 <div style={{ marginTop: '0.4rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <Grid

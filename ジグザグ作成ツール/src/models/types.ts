@@ -51,6 +51,7 @@ export interface PuzzleData {
   publicNumbers?: Record<number, boolean>; // 番号 -> 公開フラグ（部分ナンバーレス用）
   isNumbersHidden?: boolean; // 数字非表示（ウルトラモード用）
   isIrregularNumbersDisplay?: boolean; // 変則数字表示（変則モード用）
+  answerColumnSpaces?: string[]; // 解答欄のスペース位置（この文字の後にスペースを入れる）
 
   updatedAt: number;
 }
