@@ -212,7 +212,7 @@ const renderPuzzleSection = (
 
       // 内容の描画
       const hideContent = isQuestion && cell.isShaded;
-      const num = (!hideContent && cell.isNumbered) ? cell.number : null;
+      const num = (!hideContent && cell.isNumbered && puzzle.puzzleType !== 'ナンバーレス') ? cell.number : null;
       const hintChar = (!hideContent && cell.char) ? cell.char : '';
       const answerChar = (!hideContent && !isQuestion && cell.answerChar) ? cell.answerChar : '';
       const alpha = cell.answerKey || ''; // アルファベット（解答キー）は常に表示
@@ -306,7 +306,7 @@ const renderPuzzleSection = (
   let nextRow = boardEndRow + 2;
   const shouldRenderListInSheet = includeWordList && options.listPlacement !== 'separate';
   if (shouldRenderListInSheet) {
-    nextRow = renderWordList(worksheet, nextRow, 1, puzzle, options, defaultFontName, boardStartRow, boardEndRow, colStep);
+    nextRow = renderWordList(worksheet, nextRow, 1, puzzle, options, defaultFontName, boardStartRow, colStep);
   }
 
   const maxCol = Math.max(puzzle.width * colStep + 10, 50);
@@ -328,7 +328,6 @@ const renderWordList = (
   options: ExportOptions,
   defaultFontName: string,
   boardStartRow: number,
-  boardEndRow: number,
   colStep: number,
   forceNumbers?: boolean
 ) => {
@@ -338,15 +337,24 @@ const renderWordList = (
     }));
     const numbers = Array.from(boardNumbers).sort((a, b) => a - b);
     let order = numbers;
-    if (puzzle.puzzleType === 'ナンバーレス' || puzzle.puzzleType === '部分ナンバーレス') {
-      if (puzzle.wordListOrderMode === 'alphabetical') {
-        order = puzzle.customAlphabeticalOrder || numbers;
+    if (!forceNumbers) {
+      if (puzzle.puzzleType === 'ナンバーレス') {
+        if (puzzle.wordListOrderMode === 'alphabetical') {
+          order = puzzle.customAlphabeticalOrder || numbers;
+        }
+      } else if (puzzle.puzzleType === '部分ナンバーレス') {
+        // 公開分（数字順） -> 非公開分（あいうえお順）の特殊ソート
+        const publicNums = numbers.filter(n => puzzle.publicNumbers?.[n]).sort((a, b) => a - b);
+        const privateNums = (puzzle.customAlphabeticalOrder || numbers).filter(n => !puzzle.publicNumbers?.[n]);
+        order = [...publicNums, ...privateNums];
       }
     }
-    const wordEntries = order.map(id => ({
-      id,
-      word: puzzle.wordList[id] || ''
-    }));
+    const wordEntries = order.map(id => {
+      return {
+        id: id,
+        word: puzzle.wordList[id] || ''
+      };
+    });
       const numCols = options.listColumns;
       const totalItems = wordEntries.length;
       const itemsPerCol = Math.ceil(totalItems / numCols);
@@ -371,20 +379,22 @@ const renderWordList = (
         }
         
         const isArrow = puzzle.isArrowMode;
-        const isNumberless = puzzle.puzzleType === 'ナンバーレス' && !forceNumbers;
         const nCell = worksheet.getCell(r, c);
         const aCell = isArrow ? worksheet.getCell(r, c + 1) : null;
         const wCell = worksheet.getCell(r, c + (isArrow ? 2 : wordColOffset));
         
         const isStar = puzzle.wordStarList?.[entry.id];
         
-        if (isNumberless) {
+        const isHidden = !forceNumbers && (puzzle.puzzleType === 'ナンバーレス');
+        const isPartialHidden = !forceNumbers && (puzzle.puzzleType === '部分ナンバーレス') && !puzzle.publicNumbers?.[entry.id];
+
+        if (isHidden || isPartialHidden) {
           nCell.value = '（　）';
-          wCell.value = isStar ? '★' : (entry.word || '');
         } else {
+          // 数値として保存（「数値が文字列として保存されています」の警告回避）
           nCell.value = entry.id;
-          wCell.value = isStar ? '★' : (entry.word || '');
         }
+        wCell.value = isStar ? '★' : (entry.word || '');
 
         if (isArrow && aCell) {
           aCell.value = puzzle.wordDirections?.[entry.id] || '?';
@@ -404,7 +414,9 @@ const renderWordList = (
         const numColsGenerated = Math.ceil(wordEntries.length / itemsPerCol);
         for (let i = 0; i < numColsGenerated; i++) {
           const baseC = (puzzle.width + 1) * colStep + 1 + i * cellsPerEntry;
-          const numColWidth = (puzzle.puzzleType === 'ナンバーレス' && !forceNumbers) ? 5.0 : pxToChars(20);
+          const isNumberlessView = !forceNumbers && (puzzle.puzzleType === 'ナンバーレス');
+          const isPartialNumberlessView = !forceNumbers && (puzzle.puzzleType === '部分ナンバーレス');
+          const numColWidth = (isNumberlessView || isPartialNumberlessView) ? 5.0 : pxToChars(20);
           worksheet.getColumn(baseC).width = numColWidth;
           if (cellsPerEntry === 9) {
             worksheet.getColumn(baseC + 1).width = pxToChars(100);
@@ -474,12 +486,13 @@ const renderWordListSheet = (
   titleCell.alignment = { horizontal: 'center', vertical: 'middle', shrinkToFit: true };
 
   // リストの描画 (startRow=3 から開始)
-  renderWordList(worksheet, 3, 1, puzzle, options, defaultFontName, 1, 1, 1, forceNumbers);
+  renderWordList(worksheet, 3, 1, puzzle, options, defaultFontName, 1, 1, forceNumbers);
   
   // 列幅の調整
   for (let i = 0; i < numCols; i++) {
     const baseC = 1 + i * 3;
-    const numColWidth = (puzzle.puzzleType === 'ナンバーレス' && !forceNumbers) ? 5.0 : 2.5;
+    const isNumberlessLike = (puzzle.puzzleType === 'ナンバーレス' || puzzle.puzzleType === '部分ナンバーレス');
+    const numColWidth = (isNumberlessLike && !forceNumbers) ? 5.0 : (isNumberlessLike ? 5.0 : 2.5);
     worksheet.getColumn(baseC).width = numColWidth; // 数字の列
     if (puzzle.isArrowMode) {
       worksheet.getColumn(baseC + 1).width = 2.5; // 矢印の列: 2.50
@@ -532,17 +545,10 @@ export const exportToExcel = async (puzzle: PuzzleData, options: ExportOptions, 
     }
 
     renderPuzzleSection(ws, nextRow + 2, puzzle, options, false, false);
-    
-    // ナンバーレスパズルの場合、最後に数字入りの単語リストを追加
-    if (puzzle.puzzleType === 'ナンバーレス') {
-      const wsAnswerList = workbook.addWorksheet('単語リスト（解答用）');
-      wsAnswerList.views = [{ showGridLines: true }];
-      renderWordListSheet(wsAnswerList, puzzle, options, true);
-    }
   }
 
-  // 「問題」と「解答」が別シートの場合でも最後に追加
-  if (options.superLayout === 'separate' && puzzle.puzzleType === 'ナンバーレス') {
+  // ナンバーレスまたは部分ナンバーレスの場合、最後に数字入りの単語リストを別シートで追加
+  if (puzzle.puzzleType === 'ナンバーレス' || puzzle.puzzleType === '部分ナンバーレス') {
     const wsAnswerList = workbook.addWorksheet('単語リスト（解答用）');
     wsAnswerList.views = [{ showGridLines: true }];
     renderWordListSheet(wsAnswerList, puzzle, options, true);

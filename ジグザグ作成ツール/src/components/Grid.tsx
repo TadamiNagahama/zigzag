@@ -13,15 +13,13 @@ interface GridProps {
   appMode?: 'shade' | 'edit' | 'answer';
   focusedCell?: { x: number, y: number } | null;
   composingText?: string;
-  isWList?: boolean;
-  isWListStar?: boolean;
   shadingColor?: string;
   wordList?: Record<number, string>;
   boardFontWeight?: 'normal' | 'bold';
   boardFontFamily?: string;
 }
 
-export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick, onDragSelection, onDragPath, cellSize = 40, appMode = 'edit', focusedCell = null, composingText = '', isWList = false, isWListStar = false, shadingColor = '#e2e8f0', wordList = {}, boardFontWeight = 'normal', boardFontFamily = '' }) => {
+export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick, onDragSelection, onDragPath, cellSize = 40, appMode = 'edit', focusedCell = null, composingText = '', shadingColor = '#e2e8f0', wordList = {}, boardFontWeight = 'normal', boardFontFamily = '' }) => {
   const [dragStart, setDragStart] = useState<{ x: number, y: number } | null>(null);
   const [dragPath, setDragPath] = useState<{ x: number, y: number }[]>([]);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
@@ -186,7 +184,11 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick
                 position: 'relative',
                 display: (appMode === 'shade' && cell.isShaded && !cell.answerKey) ? 'none' : 'block'
               }}>
-                {(isFocused && composingText) ? composingText : (appMode === 'answer' ? (cell.answerChar || cell.char) : cell.char)}
+                {(isFocused && composingText) 
+                  ? composingText 
+                  : (appMode === 'answer' 
+                      ? (cell.answerChar || cell.char || (cell.number ? wordList[cell.number]?.charAt(0) : '')) 
+                      : cell.char)}
               </span>
 
               {cell.answerKey && (

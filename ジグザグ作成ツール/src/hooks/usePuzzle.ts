@@ -40,12 +40,14 @@ const recomputeNumbers = (
   currentWordList: Record<number, string>,
   currentWordDirections?: Record<number, string>,
   currentWordStarList?: Record<number, boolean>,
-  puzzleType?: PuzzleType
+  puzzleType?: PuzzleType,
+  publicNumbers?: Record<number, boolean>
 ) => {
   // 1. 座標ごとの単語マップを作成 (現在の番号 -> 座標 -> 単語)
   const coordsToWord: Record<string, string> = {};
   const coordsToDirection: Record<string, string> = {};
   const coordsToStar: Record<string, boolean> = {};
+
   cells.forEach(row => row.forEach(cell => {
     if (cell.number !== null) {
       if (currentWordList[cell.number]) {
@@ -64,6 +66,7 @@ const recomputeNumbers = (
   const newWordList: Record<number, string> = {};
   const newWordDirections: Record<number, string> = {};
   const newWordStarList: Record<number, boolean> = {};
+
   const newCells = cells.map(row => row.map(cell => {
     const newCell: Cell = { ...cell, number: null };
     // 番号を振る条件: 通常マスかつ、番号フラグが立っており、かつ結合されている場合は親マスであること
@@ -80,6 +83,16 @@ const recomputeNumbers = (
           if (newCell.char === word.charAt(0)) {
             newCell.char = '';
           }
+        } else if (puzzleType === '部分ナンバーレス') {
+          // 部分ナンバーレス: 公開（◎）の場合のみ1文字目を表示
+          if (publicNumbers?.[num]) {
+            newCell.char = word.charAt(0);
+          } else {
+            // 非公開時は頭文字を自動で入れない（手動入力されたヒント文字は維持する）
+            if (newCell.char === word.charAt(0)) {
+              newCell.char = '';
+            }
+          }
         } else {
           // ナンバーレス以外では頭文字を自動で表示
           newCell.char = word.charAt(0);
@@ -94,7 +107,6 @@ const recomputeNumbers = (
         newWordStarList[num] = true;
         newCell.char = ''; // スター項目は盤面文字を消去
       }
-      // 単語がない場合でも既存の文字 (newCell.char) は消さない
     }
     return newCell;
   }));
@@ -103,9 +115,7 @@ const recomputeNumbers = (
   return { cells: newCells, wordList: newWordList, wordDirections: newWordDirections, wordStarList: newWordStarList, numbers };
 };
 
-const recomputeNumbersWithDirections = (cells: Cell[][], currentWordList: Record<number, string>, currentWordDirections?: Record<number, string>, currentWordStarList?: Record<number, boolean>, puzzleType?: PuzzleType) => {
-  return recomputeNumbers(cells, currentWordList, currentWordDirections, currentWordStarList, puzzleType);
-};
+
 
 const getInitialPuzzle = (w: number, h: number): PuzzleData => {
   const savedData = localStorage.getItem('zigzag_autosave_data');
@@ -145,17 +155,30 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
     push(prev => {
       let customAlphabeticalOrder = prev.customAlphabeticalOrder;
       if (mode === 'alphabetical' && !customAlphabeticalOrder) {
-        // 初期化: 漢字コード順でソート
+        // 初期化
         const boardNumbers = new Set<number>();
         prev.cells.forEach(row => row.forEach(cell => {
           if (cell.number) boardNumbers.add(cell.number);
         }));
         const numbers = Array.from(boardNumbers);
-        customAlphabeticalOrder = numbers.sort((a, b) => {
-          const wordA = prev.wordList[a] || '';
-          const wordB = prev.wordList[b] || '';
-          return wordA.localeCompare(wordB, 'ja');
-        });
+        
+        if (prev.puzzleType === '部分ナンバーレス') {
+          // 部分ナンバーレス: 公開(数字順) + 非公開(あいうえお順)
+          const publicNums = numbers.filter(n => prev.publicNumbers?.[n]).sort((a, b) => a - b);
+          const privateNums = numbers.filter(n => !prev.publicNumbers?.[n]).sort((a, b) => {
+            const wordA = prev.wordList[a] || '';
+            const wordB = prev.wordList[b] || '';
+            return wordA.localeCompare(wordB, 'ja');
+          });
+          customAlphabeticalOrder = [...publicNums, ...privateNums];
+        } else {
+          // 通常: 漢字コード順(あいうえお順)
+          customAlphabeticalOrder = numbers.sort((a, b) => {
+            const wordA = prev.wordList[a] || '';
+            const wordB = prev.wordList[b] || '';
+            return wordA.localeCompare(wordB, 'ja');
+          });
+        }
       }
       return { ...prev, wordListOrderMode: mode, customAlphabeticalOrder, updatedAt: Date.now() };
     });
@@ -211,7 +234,7 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
         }
         newCells.push(row);
       }
-      const result = recomputeNumbersWithDirections(newCells, prev.wordList, prev.wordDirections, prev.wordStarList, prev.puzzleType);
+      const result = recomputeNumbers(newCells, prev.wordList, prev.wordDirections, prev.wordStarList, prev.puzzleType, prev.publicNumbers);
       return {
         ...prev,
         width: w,
@@ -234,7 +257,7 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
         cell.answerChar = '';
         cell.answerKey = null;
       }
-      const result = recomputeNumbersWithDirections(newCells, prev.wordList, prev.wordDirections, prev.wordStarList, prev.puzzleType);
+      const result = recomputeNumbers(newCells, prev.wordList, prev.wordDirections, prev.wordStarList, prev.puzzleType, prev.publicNumbers);
       return { 
         ...prev, 
         ...result, 
@@ -254,7 +277,7 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
       if (!cell.isNumbered) {
         cell.char = '';
       }
-      const result = recomputeNumbersWithDirections(newCells, prev.wordList, prev.wordDirections, prev.wordStarList, prev.puzzleType);
+      const result = recomputeNumbers(newCells, prev.wordList, prev.wordDirections, prev.wordStarList, prev.puzzleType, prev.publicNumbers);
       return { 
         ...prev, 
         ...result, 
@@ -283,8 +306,13 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
       const isStar = prev.wordStarList?.[number];
       const newCells = prev.cells.map(row => row.map(cell => {
         if (cell.number === number) {
-          // ナンバーレスモードの場合は頭文字を自動で入れない
-          const char = (isStar || prev.puzzleType === 'ナンバーレス') ? '' : word.charAt(0);
+          // 公開設定に応じた頭文字の自動表示判定
+          let char = '';
+          if (prev.puzzleType === '部分ナンバーレス') {
+            if (prev.publicNumbers?.[number]) char = word.charAt(0);
+          } else if (prev.puzzleType !== 'ナンバーレス' && !isStar) {
+            char = word.charAt(0);
+          }
           return { ...cell, char };
         }
         return { ...cell };
@@ -292,6 +320,17 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
       return { ...prev, wordList: newWordList, cells: newCells, updatedAt: Date.now() };
     });
   }, [setPuzzle, takeCheckpoint]);
+
+  const togglePublicNumber = useCallback((number: number) => {
+    push(prev => {
+      const newPublicNumbers = { ...prev.publicNumbers };
+      newPublicNumbers[number] = !newPublicNumbers[number];
+
+      // 盤面の文字を更新
+      const result = recomputeNumbers(prev.cells, prev.wordList, prev.wordDirections, prev.wordStarList, prev.puzzleType, newPublicNumbers);
+      return { ...prev, ...result, publicNumbers: newPublicNumbers, updatedAt: Date.now() };
+    });
+  }, [push]);
 
   const toggleWordStar = useCallback((number: number) => {
     push(prev => {
@@ -328,7 +367,7 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
 
   const setPuzzleType = useCallback((puzzleType: PuzzleType) => {
     push(prev => {
-      const result = recomputeNumbersWithDirections(prev.cells, prev.wordList, prev.wordDirections, prev.wordStarList, puzzleType);
+      const result = recomputeNumbers(prev.cells, prev.wordList, prev.wordDirections, prev.wordStarList, puzzleType, prev.publicNumbers);
       return {
         ...prev,
         ...result,
@@ -399,7 +438,7 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
     push(prev => {
       const newCells = prev.cells.map(row => row.map(cell => ({ ...cell })));
       newCells[y][x].char = char;
-      return { ...prev, ...recomputeNumbersWithDirections(newCells, prev.wordList, prev.wordDirections, prev.wordStarList, prev.puzzleType), updatedAt: Date.now() };
+      return { ...prev, ...recomputeNumbers(newCells, prev.wordList, prev.wordDirections, prev.wordStarList, prev.puzzleType, prev.publicNumbers), updatedAt: Date.now() };
     });
   }, [push]);
 
@@ -479,7 +518,7 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
         }
       }
 
-      const result = recomputeNumbersWithDirections(newCells, prev.wordList, prev.wordDirections, prev.wordStarList, prev.puzzleType);
+      const result = recomputeNumbers(newCells, prev.wordList, prev.wordDirections, prev.wordStarList, prev.puzzleType, prev.publicNumbers);
       return { 
         ...prev, 
         ...result, 
@@ -508,7 +547,7 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
         }
       }
 
-      const result = recomputeNumbersWithDirections(newCells, prev.wordList, prev.wordDirections, prev.wordStarList, prev.puzzleType);
+      const result = recomputeNumbers(newCells, prev.wordList, prev.wordDirections, prev.wordStarList, prev.puzzleType, prev.publicNumbers);
       return { 
         ...prev, 
         ...result, 
@@ -567,10 +606,21 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
           if (cell.number) boardNumbers.add(cell.number);
         }));
         const numbers = Array.from(boardNumbers).sort((a, b) => a - b);
-        const currentOrder = prev.customAlphabeticalOrder || numbers;
-        const newOrder = Array.from(currentOrder);
+        
+        // 現在の表示順序を再現
+        let currentRenderedOrder: number[];
+        if (prev.puzzleType === '部分ナンバーレス' && prev.wordListOrderMode === 'alphabetical') {
+          const publicNums = numbers.filter(n => prev.publicNumbers?.[n]).sort((a, b) => a - b);
+          const privateNums = (prev.customAlphabeticalOrder || numbers).filter(n => !prev.publicNumbers?.[n]);
+          currentRenderedOrder = [...publicNums, ...privateNums];
+        } else {
+          currentRenderedOrder = prev.customAlphabeticalOrder || numbers;
+        }
+
+        const newOrder = Array.from(currentRenderedOrder);
         const [removed] = newOrder.splice(startIndex, 1);
         newOrder.splice(endIndex, 0, removed);
+        
         return { ...prev, customAlphabeticalOrder: newOrder, updatedAt: Date.now() };
       });
     }, [push]),
@@ -581,6 +631,7 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
     canUndo,
     canRedo,
     reset: resetInternal,
-    createNewBoard
+    createNewBoard,
+    togglePublicNumber,
   };
 };

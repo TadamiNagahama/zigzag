@@ -48,6 +48,8 @@ export interface PuzzleData {
   tags?: string[]; // タグ一覧
   customAlphabeticalOrder?: number[]; // あいうえお順の表示順序（番号の配列）
   wordListOrderMode?: 'numerical' | 'alphabetical'; // 現在の表示モード
+  publicNumbers?: Record<number, boolean>; // 番号 -> 公開フラグ（部分ナンバーレス用）
+
   updatedAt: number;
 }
 

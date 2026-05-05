@@ -55,12 +55,14 @@ function App() {
     removeTag,
     mergeCells,
     splitCell,
+    updateCellChar,
     undo,
     redo,
     canUndo,
     canRedo,
     reset,
-    createNewBoard
+    createNewBoard,
+    togglePublicNumber
   } = usePuzzle(17, 17);
 
   const [editMode, setEditMode] = useState<EditMode>('number');
@@ -402,6 +404,7 @@ function App() {
             toggleNumberFlag(x, y);
             setFocusedCell(null);
           }
+
         } else {
           toggleNumberFlag(x, y);
         }
@@ -593,16 +596,28 @@ function App() {
 
     // 1. 盤面充填チェック
     let emptyCellCount = 0;
+    const emptyCoords: string[] = [];
     for (let y = 0; y < puzzle.height; y++) {
       for (let x = 0; x < puzzle.width; x++) {
         const cell = puzzle.cells[y][x];
-        if (cell.type === 'normal' && !cell.char && !cell.answerChar) {
-          emptyCellCount++;
+        if (cell.type === 'normal') {
+          // 解答モードかつ起点マスの場合は、動的ヒントが表示されるためデータが空でも未入力とはみなさない
+          const isHintShown = appMode === 'answer' && cell.number;
+          if (!cell.char && !cell.answerChar && !isHintShown) {
+            emptyCellCount++;
+            if (emptyCoords.length < 5) {
+              emptyCoords.push(`左から${x + 1}マス目, 上から${y + 1}マス目`);
+            }
+          }
         }
       }
     }
     if (emptyCellCount > 0) {
-      errors.push(`盤面に未入力のマスがあります (${emptyCellCount}箇所)`);
+      let errorMsg = `盤面に未入力のマスがあります (${emptyCellCount}箇所)`;
+      if (emptyCoords.length > 0) {
+        errorMsg += `\n(例: ${emptyCoords.join(' / ')})`;
+      }
+      errors.push(errorMsg);
     }
 
     // 2. リスト充填チェック
@@ -1087,6 +1102,7 @@ function App() {
                   <option value="Wリスト★">Wリスト★</option>
                   <option value="ナンバーレス">ナンバーレス</option>
                   <option value="部分ナンバーレス">部分ナンバーレス</option>
+
                   <option value="ウルトラ">ウルトラ</option>
                   <option value="変則">変則</option>
                   <option value="矢印">矢印</option>
@@ -1143,7 +1159,7 @@ function App() {
                       onClick={() => setWordListOrderMode(puzzle.wordListOrderMode === 'alphabetical' ? 'numerical' : 'alphabetical')}
                       title={puzzle.wordListOrderMode === 'alphabetical' ? "数字順に並べ替え" : "あいうえお順に並べ替え"}
                     >
-                      {puzzle.wordListOrderMode === 'alphabetical' ? '数字順へ' : 'あいうえお順へ'}
+                      {puzzle.wordListOrderMode === 'alphabetical' ? '数字順' : 'あいうえお順'}
                     </button>
                   )}
                 </div>
@@ -1157,7 +1173,15 @@ function App() {
             <section style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', padding: '12px 16px' }}>
               <div style={{ fontSize: '0.8rem' }}>
                 <div className="word-list-grid" style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
-                  {(puzzle.wordListOrderMode === 'alphabetical' ? (puzzle.customAlphabeticalOrder || numbers) : numbers).map((num, idx) => (
+                  {(() => {
+                    const numbersList = Array.from(numbers);
+                    if (puzzle.puzzleType === '部分ナンバーレス' && puzzle.wordListOrderMode === 'alphabetical') {
+                      const publicNums = numbersList.filter(n => puzzle.publicNumbers?.[n]).sort((a, b) => a - b);
+                      const privateNums = (puzzle.customAlphabeticalOrder || numbersList).filter(n => !puzzle.publicNumbers?.[n]);
+                      return [...publicNums, ...privateNums];
+                    }
+                    return (puzzle.wordListOrderMode === 'alphabetical' ? (puzzle.customAlphabeticalOrder || numbers) : numbers);
+                  })().map((num, idx) => (
                     <div
                       key={num}
                       draggable={puzzle.wordListOrderMode === 'alphabetical'}
@@ -1190,7 +1214,29 @@ function App() {
                       }}
                       onDragEnd={() => setDraggedItemIndex(null)}
                     >
-                      <span style={{ minWidth: '24px', fontWeight: 'bold', fontSize: '0.9rem', color: 'var(--text-muted)' }}>{num}.</span>
+                      <span style={{ minWidth: '24px', fontWeight: 'bold', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+                        {`${num}.`}
+                      </span>
+                      {puzzle.puzzleType === '部分ナンバーレス' && (
+                        <span
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            togglePublicNumber(num);
+                          }}
+                          style={{
+                            cursor: 'pointer',
+                            fontSize: '1rem',
+                            marginLeft: '2px',
+                            marginRight: '6px',
+                            color: puzzle.publicNumbers?.[num] ? '#4f46e5' : '#94a3b8',
+                            fontWeight: 'bold',
+                            transition: 'color 0.2s'
+                          }}
+                          title="数字を公開/非公開"
+                        >
+                          {puzzle.publicNumbers?.[num] ? '◎' : '×'}
+                        </span>
+                      )}
                       {puzzle.isWListStar && (
                         <input
                           type="checkbox"
@@ -1442,8 +1488,6 @@ function App() {
                     appMode={appMode}
                     focusedCell={focusedCell}
                     composingText={composingText}
-                    isWList={puzzle.isWList}
-                    isWListStar={puzzle.isWListStar}
                     shadingColor={puzzle.shadingColor}
                     wordList={puzzle.wordList}
                     boardFontWeight={puzzle.boardFontWeight || 'normal'}
