@@ -21,6 +21,7 @@ interface LayoutProps {
   onTabChange: (tab: 'board' | 'list') => void;
   appMode: 'shade' | 'edit' | 'answer';
   onModeChange: (mode: 'shade' | 'edit' | 'answer') => void;
+  onImportExcel?: () => void;
 }
 
 export const Layout: React.FC<LayoutProps> = ({ 
@@ -28,7 +29,8 @@ export const Layout: React.FC<LayoutProps> = ({
   undo, redo, canUndo, canRedo,
   user, onLogin, onLogout, onHelp, onSettings,
   activeTab, onTabChange,
-  appMode, onModeChange
+  appMode, onModeChange,
+  onImportExcel
 }) => {
   return (
     <div className="layout-container">
@@ -72,6 +74,11 @@ export const Layout: React.FC<LayoutProps> = ({
               <button onClick={onSave} className="btn-secondary menu-btn save-btn">
                 <Save size={16} /> <span className="btn-text">保存</span>
               </button>
+              {onImportExcel && (
+                <button onClick={onImportExcel} className="btn-secondary menu-btn import-btn">
+                  <FolderOpen size={16} /> <span className="btn-text"><span className="excel-word-pc">Excel</span>読込</span>
+                </button>
+              )}
               <button onClick={onExport} className="btn-primary menu-btn excel-btn">
                 <img src={excelIcon} alt="Excel" className="excel-icon" />
                 <span className="btn-text"><span className="excel-word-pc">Excel</span>出力</span>

@@ -16,6 +16,9 @@ import { TagDialog } from './components/TagDialog'
 import { HelpDialog } from './components/HelpDialog'
 import { WelcomeDialog } from './components/WelcomeDialog'
 import { exportToExcel } from './utils/excelExport'
+import { analyzeExcelFile, type ExcelImportResult, convertManualImportToPuzzle } from './utils/excelImport'
+import { ImportPreviewDialog } from './components/ImportPreviewDialog'
+import type { ManualImportConfig } from './utils/excelImport'
 import { auth, dbFirestore, googleProvider } from './models/firebase'
 import { signInWithPopup, signOut, onAuthStateChanged, type User } from 'firebase/auth'
 import { collection, addDoc, getDocs, query, where, deleteDoc, doc, updateDoc } from 'firebase/firestore'
@@ -225,6 +228,8 @@ function App() {
   const [exportSettings, setExportSettings] = useState<Partial<ExportOptions>>({});
   const [confirmAction, setConfirmAction] = useState<{ message: string | React.ReactNode, onConfirm: () => void, isDestructive?: boolean } | null>(null);
   const [showMobileSettingsMenu, setShowMobileSettingsMenu] = useState(false);
+  const [importResult, setImportResult] = useState<ExcelImportResult | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // クラウド自動保存の設定（デフォルトOFF）
   const [cloudAutoSave, setCloudAutoSave] = useState(() => {
@@ -1261,12 +1266,40 @@ function App() {
 
 
 
+  const handleImportExcelClick = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const result = await analyzeExcelFile(file);
+      setImportResult(result);
+    } catch (error) {
+      console.error('Excelファイルの解析に失敗しました', error);
+      alert('Excelファイルの解析に失敗しました。');
+    } finally {
+      e.target.value = ''; // Reset input
+    }
+  };
+
+  const handleImportConfirm = (config: ManualImportConfig) => {
+    if (!importResult) return;
+    const newPuzzle = convertManualImportToPuzzle(puzzle, importResult.workbook, config);
+    setPuzzle(newPuzzle);
+    setImportResult(null);
+  };
+
   return (
-    <Layout
-      onExport={handleExport}
-      onNew={handleNew}
-      onSave={handleSave}
-      onLoad={handleLoad}
+      <Layout
+        onExport={handleExport}
+        onNew={handleNew}
+        onSave={handleSave}
+        onLoad={handleLoad}
+        onImportExcel={handleImportExcelClick}
       onHelp={() => setShowHelpDialog(true)}
       onSettings={() => {
         if (window.innerWidth < 768) {
@@ -2107,6 +2140,22 @@ function App() {
           </div>
         </div>
       )}
+
+      {importResult && (
+        <ImportPreviewDialog
+          importResult={importResult}
+          onClose={() => setImportResult(null)}
+          onImport={handleImportConfirm}
+        />
+      )}
+
+      <input
+        type="file"
+        accept=".xlsx"
+        style={{ display: 'none' }}
+        ref={fileInputRef}
+        onChange={handleFileChange}
+      />
     </Layout>
   )
 }
