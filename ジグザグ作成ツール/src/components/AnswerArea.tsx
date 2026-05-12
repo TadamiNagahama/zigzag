@@ -24,7 +24,6 @@ export const AnswerArea: React.FC<AnswerAreaProps> = ({
   list2 = [],
   onSelectRemaining,
   isEditingSpaces = false,
-  answerColumnSpaces = [],
   onToggleSpace,
   onToggleEditing
 }) => {

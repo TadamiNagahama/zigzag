@@ -85,10 +85,12 @@ function App() {
     toggleNumbersHidden,
     toggleIrregularNumbersDisplay,
     toggleAnswerColumnSpace,
+    reorderWordList2,
   } = usePuzzle(17, 17);
 
   const [editMode, setEditMode] = useState<EditMode>('number');
   const [draggedItemIndex, setDraggedItemIndex] = useState<number | null>(null);
+  const [draggedWord2Index, setDraggedWord2Index] = useState<number | null>(null);
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
   const [showPrintDialog, setShowPrintDialog] = useState(false);
   const [printOptions, setPrintOptions] = useState<PrintOptions | null>(null);
@@ -594,21 +596,21 @@ function App() {
   const handleDragSelection = (x1: number, y1: number, x2: number, y2: number) => {
     if (appMode === 'answer') return;
 
-    if (appMode === 'shade') {
-      const startX = Math.min(x1, x2);
-      const endX = Math.max(x1, x2);
-      const startY = Math.min(y1, y2);
-      const endY = Math.max(y1, y2);
-      const targetValue = !puzzle.cells[startY][startX].isShaded;
-      for (let y = startY; y <= endY; y++) {
-        for (let x = startX; x <= endX; x++) {
-          toggleShaded(x, y, targetValue);
+        if (appMode === 'shade') {
+          const startX = Math.min(x1, x2);
+          const endX = Math.max(x1, x2);
+          const startY = Math.min(y1, y2);
+          const endY = Math.max(y1, y2);
+          const targetValue = !puzzle.cells[startY][startX].isShaded;
+          for (let y = startY; y <= endY; y++) {
+            for (let x = startX; x <= endX; x++) {
+              toggleShaded(x, y, targetValue);
+            }
+          }
+        } else if (appMode === 'edit') {
+          mergeCells(x1, y1, x2, y2);
         }
       }
-    } else if (appMode === 'edit') {
-      mergeCells(x1, y1, x2, y2);
-    }
-  }
 
   const handleDragPath = (path: { x: number, y: number }[]) => {
     if (path.length < 2) return;
@@ -647,22 +649,30 @@ function App() {
         if (!word) return;
 
         let currentCharIndex = 0;
+        let lastLogicalKey = "";
 
         for (let i = 0; i < path.length; i++) {
           const curr = path[i];
-          if (i > 0) {
-            const prev = path[i - 1];
-            const dist = Math.abs(curr.x - prev.x) + Math.abs(curr.y - prev.y);
-            currentCharIndex += dist;
+          const cell = puzzle.cells[curr.y][curr.x];
+          
+          // 現在の場所の論理的な位置（結合されていれば親の座標）
+          const px = cell.mergedParent ? cell.mergedParent.x : curr.x;
+          const py = cell.mergedParent ? cell.mergedParent.y : curr.y;
+          const logicalKey = `${px},${py}`;
+
+          // 前のステップと違う論理マスに移動した場合のみ、文字インデックスを進める
+          if (i > 0 && logicalKey !== lastLogicalKey) {
+            currentCharIndex++;
           }
+          lastLogicalKey = logicalKey;
 
           if (currentCharIndex < word.length) {
-            const cell = puzzle.cells[curr.y][curr.x];
+            const parentCell = puzzle.cells[py][px];
             // 起点以外の数字マス（他の単語の1文字目）は上書きしない
-            if (i > 0 && cell.number !== null) {
+            if (i > 0 && parentCell.number !== null && !parentCell.mergedParent) {
               continue;
             }
-            updateCellAnswerChar(curr.x, curr.y, word[currentCharIndex]);
+            updateCellAnswerChar(px, py, word[currentCharIndex]);
           } else {
             break;
           }
@@ -775,6 +785,10 @@ function App() {
       for (let x = 0; x < puzzle.width; x++) {
         const cell = puzzle.cells[y][x];
         if (cell.type === 'normal') {
+          // 大マス（結合セル）の子セルの場合は、親セル（左上）にデータが入るためスキップ
+          const isMergedChild = cell.mergedParent && (cell.mergedParent.x !== x || cell.mergedParent.y !== y);
+          if (isMergedChild) continue;
+
           // 解答モードかつ起点マスの場合は、動的ヒントが表示されるためデータが空でも未入力とはみなさない
           const isHintShown = appMode === 'answer' && cell.number;
           if (!cell.char && !cell.answerChar && !isHintShown) {
@@ -826,10 +840,16 @@ function App() {
         if (x < 0 || x >= puzzle.width || y < 0 || y >= puzzle.height) return 0;
 
         const cell = puzzle.cells[y][x];
-        const currentChar = cell.char || cell.answerChar;
-        if (cell.type !== 'normal' || currentChar !== w[0]) return 0;
+        // 結合されている場合は親マスの座標を取得
+        const px = cell.mergedParent ? cell.mergedParent.x : x;
+        const py = cell.mergedParent ? cell.mergedParent.y : y;
+        const parentCell = puzzle.cells[py][px];
 
-        const key = `${x},${y}`;
+        const currentChar = parentCell.char || parentCell.answerChar;
+        if (parentCell.type !== 'normal' || currentChar !== w[0]) return 0;
+
+        // 訪問済みチェックは結合グループ（親マスの座標）で行う
+        const key = `${px},${py}`;
         if (visited.has(key)) return 0;
 
         const nextW = w.slice(1);
@@ -838,11 +858,45 @@ function App() {
         const newVisited = new Set(visited);
         newVisited.add(key);
 
+        // 次の文字を探すために、結合範囲の全てのマスとその隣接マスをリストアップ
         let total = 0;
+        const groupCells: {x: number, y: number}[] = [];
+        if (parentCell.mergedSize) {
+          for (let dy = 0; dy < parentCell.mergedSize.height; dy++) {
+            for (let dx = 0; dx < parentCell.mergedSize.width; dx++) {
+              groupCells.push({ x: px + dx, y: py + dy });
+            }
+          }
+        } else {
+          groupCells.push({ x: px, y: py });
+        }
+
+        const checkedNeighborGroups = new Set<string>();
         const neighbors = [[0, 1], [0, -1], [1, 0], [-1, 0]];
-        for (const [dx, dy] of neighbors) {
-          total += countPaths(nextW, x + dx, y + dy, newVisited);
-          if (total >= 2) break; // 2つ以上見つかれば十分
+        
+        for (const gc of groupCells) {
+          for (const [dx, dy] of neighbors) {
+            const nx = gc.x + dx;
+            const ny = gc.y + dy;
+            if (nx < 0 || nx >= puzzle.width || ny < 0 || ny >= puzzle.height) continue;
+            
+            const nCell = puzzle.cells[ny][nx];
+            if (nCell.type !== 'normal') continue;
+
+            const npx = nCell.mergedParent ? nCell.mergedParent.x : nx;
+            const npy = nCell.mergedParent ? nCell.mergedParent.y : ny;
+            
+            // 隣接マスが自分と同じ結合グループ内ならスキップ
+            if (npx === px && npy === py) continue;
+
+            // すでにチェック済みの隣接グループ（親が同じ）ならスキップ
+            const nGroupKey = `${npx},${npy}`;
+            if (checkedNeighborGroups.has(nGroupKey)) continue;
+            checkedNeighborGroups.add(nGroupKey);
+
+            total += countPaths(nextW, nx, ny, newVisited);
+            if (total >= 2) return 2; // 2つ以上あれば十分
+          }
         }
         return total;
       };
@@ -1373,7 +1427,7 @@ function App() {
 
                 {appMode === 'answer' ? (
                   <>
-                    <button className="btn-secondary" style={{ flex: 1, fontSize: '0.8rem', padding: '6px 2px', lineHeight: '1.2' }}>自動<br />解答</button>
+                    <button className="btn-secondary" style={{ flex: 1, fontSize: '0.8rem', padding: '6px 2px', lineHeight: '1.2' }} onClick={() => setAlertMessage('将来的に実装予定です')}>自動<br />解答</button>
                     <button className="btn-secondary" style={{ flex: 1, fontSize: '0.8rem', padding: '6px 2px', lineHeight: '1.2' }} onClick={validateManuscript}>完成<br />チェック</button>
                   </>
                 ) : (
@@ -1575,8 +1629,39 @@ function App() {
                     </div>
                     <div className="word-list2-container" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       {(puzzle.wordList2 || ['']).map((word, idx) => (
-                        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <span style={{ minWidth: '24px' }}></span> {/* 幅合わせ用の空スペース */}
+                        <div 
+                          key={idx} 
+                          draggable
+                          onDragStart={(e) => {
+                            setDraggedWord2Index(idx);
+                            e.dataTransfer.effectAllowed = 'move';
+                          }}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            e.dataTransfer.dropEffect = 'move';
+                          }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            if (draggedWord2Index !== null && draggedWord2Index !== idx) {
+                              reorderWordList2(draggedWord2Index, idx);
+                            }
+                            setDraggedWord2Index(null);
+                          }}
+                          onDragEnd={() => setDraggedWord2Index(null)}
+                          style={{ 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            gap: '6px',
+                            cursor: 'grab',
+                            padding: '4px',
+                            borderRadius: '4px',
+                            backgroundColor: draggedWord2Index === idx ? 'var(--bg-secondary)' : 'transparent',
+                            transition: 'background-color 0.2s'
+                          }}
+                        >
+                          <span style={{ minWidth: '24px', fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 'bold' }}>
+                            {`${idx + 1}.`}
+                          </span>
                           <input
                             type="text"
                             value={word}

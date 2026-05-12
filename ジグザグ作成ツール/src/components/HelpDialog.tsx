@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, BookOpen, Monitor, Edit3, CheckCircle, Layers, FileDown, Lock, Database, Mail, Shield } from 'lucide-react';
+import { X, BookOpen, Monitor, Edit3, CheckCircle, Layers, FileDown, Lock, Database, Mail, Shield, MessageSquare } from 'lucide-react';
 
 interface HelpDialogProps {
   onClose: () => void;
@@ -284,6 +284,10 @@ export const HelpDialog: React.FC<HelpDialogProps> = ({ onClose }) => {
                   </div>
                 </section>
               </div>
+              <div style={{ marginTop: '20px', padding: '12px', background: '#fffbeb', borderRadius: '8px', border: '1px solid #fef3c7' }}>
+                <div style={{ fontSize: '0.85rem', color: '#92400e', fontWeight: 'bold', marginBottom: '4px' }}>掲示板利用キーワード</div>
+                <div style={{ fontSize: '1rem', color: '#b45309', textAlign: 'center', letterSpacing: '4px' }}>稲妻</div>
+              </div>
             </div>
           </div>
         );
@@ -294,7 +298,29 @@ export const HelpDialog: React.FC<HelpDialogProps> = ({ onClose }) => {
               <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
                 <Mail size={20} style={{ color: '#6366f1', flexShrink: 0, marginTop: '4px' }} />
                 <div>
-                  <strong style={{ display: 'block', color: '#6366f1', marginBottom: '4px' }}>お問い合わせ</strong>
+                  <strong style={{ display: 'block', color: '#6366f1', marginBottom: '4px' }}>公式掲示板</strong>
+                  <p style={{ margin: '0 0 8px 0' }}>作家様同士の交流やバグ報告のための掲示板を開設しました。</p>
+                  <a
+                    href="https://zigzag-bbs.kimpirakobo.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      background: 'var(--primary-color)',
+                      color: 'white',
+                      padding: '8px 16px',
+                      borderRadius: '6px',
+                      textDecoration: 'none',
+                      fontWeight: 'bold',
+                      marginBottom: '16px'
+                    }}
+                  >
+                    <MessageSquare size={18} /> 掲示板を開く
+                  </a>
+
+                  <strong style={{ display: 'block', color: '#6366f1', marginBottom: '4px' }}>個別のお問い合わせ</strong>
                   <p style={{ margin: '0 0 8px 0' }}>ご不明な点や不具合がございましたら、下記までご連絡ください。</p>
                   <div style={{ background: 'var(--primary-light)', padding: '10px', borderRadius: '8px', display: 'inline-block' }}>
                     キンピラ工房（長浜忠実）<br />

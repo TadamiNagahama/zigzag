@@ -466,8 +466,13 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
 
   const updateCellAnswerChar = useCallback((x: number, y: number, char: string) => {
     push(prev => {
-      const newCells = prev.cells.map(row => row.map(cell => ({ ...cell })));
-      newCells[y][x].answerChar = char;
+      const cell = prev.cells[y][x];
+      // 結合されている場合は親マスの座標に書き込む
+      const targetX = cell.mergedParent ? cell.mergedParent.x : x;
+      const targetY = cell.mergedParent ? cell.mergedParent.y : y;
+
+      const newCells = prev.cells.map(row => row.map(c => ({ ...c })));
+      newCells[targetY][targetX].answerChar = char;
       return { ...prev, cells: newCells, updatedAt: Date.now() };
     });
   }, [push]);
@@ -602,6 +607,41 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
     return () => clearTimeout(timer);
   }, [puzzle]);
 
+  const reorderWordList = useCallback((startIndex: number, endIndex: number) => {
+    push(prev => {
+      const boardNumbers = new Set<number>();
+      prev.cells.forEach(row => row.forEach(cell => {
+        if (cell.number) boardNumbers.add(cell.number);
+      }));
+      const numbers = Array.from(boardNumbers).sort((a, b) => a - b);
+      
+      // 現在の表示順序を再現
+      let currentRenderedOrder: number[];
+      if (prev.puzzleType === '部分ナンバーレス' && prev.wordListOrderMode === 'alphabetical') {
+        const publicNums = numbers.filter(n => prev.publicNumbers?.[n]).sort((a, b) => a - b);
+        const privateNums = (prev.customAlphabeticalOrder || numbers).filter(n => !prev.publicNumbers?.[n]);
+        currentRenderedOrder = [...publicNums, ...privateNums];
+      } else {
+        currentRenderedOrder = prev.customAlphabeticalOrder || numbers;
+      }
+
+      const newOrder = Array.from(currentRenderedOrder);
+      const [removed] = newOrder.splice(startIndex, 1);
+      newOrder.splice(endIndex, 0, removed);
+      
+      return { ...prev, customAlphabeticalOrder: newOrder, updatedAt: Date.now() };
+    });
+  }, [push]);
+
+  const reorderWordList2 = useCallback((startIndex: number, endIndex: number) => {
+    push(prev => {
+      const newList2 = Array.from(prev.wordList2 || []);
+      const [removed] = newList2.splice(startIndex, 1);
+      newList2.splice(endIndex, 0, removed);
+      return { ...prev, wordList2: newList2, updatedAt: Date.now() };
+    });
+  }, [push]);
+
   return {
     puzzle,
     setPuzzle,
@@ -631,31 +671,8 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
     removeTag,
     mergeCells,
     splitCell,
-    reorderWordList: useCallback((startIndex: number, endIndex: number) => {
-      push(prev => {
-        const boardNumbers = new Set<number>();
-        prev.cells.forEach(row => row.forEach(cell => {
-          if (cell.number) boardNumbers.add(cell.number);
-        }));
-        const numbers = Array.from(boardNumbers).sort((a, b) => a - b);
-        
-        // 現在の表示順序を再現
-        let currentRenderedOrder: number[];
-        if (prev.puzzleType === '部分ナンバーレス' && prev.wordListOrderMode === 'alphabetical') {
-          const publicNums = numbers.filter(n => prev.publicNumbers?.[n]).sort((a, b) => a - b);
-          const privateNums = (prev.customAlphabeticalOrder || numbers).filter(n => !prev.publicNumbers?.[n]);
-          currentRenderedOrder = [...publicNums, ...privateNums];
-        } else {
-          currentRenderedOrder = prev.customAlphabeticalOrder || numbers;
-        }
-
-        const newOrder = Array.from(currentRenderedOrder);
-        const [removed] = newOrder.splice(startIndex, 1);
-        newOrder.splice(endIndex, 0, removed);
-        
-        return { ...prev, customAlphabeticalOrder: newOrder, updatedAt: Date.now() };
-      });
-    }, [push]),
+    reorderWordList,
+    reorderWordList2,
     setWordListOrderMode,
     takeCheckpoint,
     undo,
