@@ -18,13 +18,16 @@ export interface ExcelImportResult {
 export interface RangeDef {
   sheetName: string;
   startCell: string; // 例: 'B2'
-  endCell: string;   // 例: 'K15'
+  endCell?: string;   // リストなどでは使われる。問題面・解答面では自動計算のため不要
 }
 
 export interface ManualImportConfig {
+  boardWidth: number;
+  boardHeight: number;
   problemRange?: RangeDef;
-  patternType: 1 | 2 | 3;
+  problemPatternType: 1 | 2 | 3;
   answerRange?: RangeDef;
+  answerPatternType: 1 | 2 | 3;
   listRange?: RangeDef;
 }
 
@@ -41,10 +44,8 @@ function extractCellValue(cell: ExcelJS.Cell): { value: any; text: string } {
 
   if (typeof value === 'object') {
     if ('result' in value) {
-      // 数式の場合、計算結果を取得
       value = value.result;
     } else if ('richText' in value) {
-      // リッチテキストの場合
       value = (value.richText as any[]).map(rt => rt.text).join('');
     } else if ('text' in value) {
         value = value.text;
@@ -57,9 +58,6 @@ function extractCellValue(cell: ExcelJS.Cell): { value: any; text: string } {
   return { value, text };
 }
 
-/**
- * 背景色があるかどうか
- */
 function getCellBackgroundColor(cell: ExcelJS.Cell): string | undefined {
   const fill = cell.fill;
   if (!fill) return undefined;
@@ -69,9 +67,6 @@ function getCellBackgroundColor(cell: ExcelJS.Cell): string | undefined {
   return undefined;
 }
 
-/**
- * Excelファイルを読み込み、シート名のリストを返す
- */
 export async function analyzeExcelFile(file: File): Promise<ExcelImportResult> {
   const arrayBuffer = await file.arrayBuffer();
   const workbook = new ExcelJS.Workbook();
@@ -85,32 +80,31 @@ export async function analyzeExcelFile(file: File): Promise<ExcelImportResult> {
   return { sheetNames, workbook };
 }
 
+// A1形式を解釈
+const parseCellRef = (ref: string) => {
+  const match = ref.toUpperCase().match(/^([A-Z]+)(\d+)$/);
+  if (!match) return null;
+  const colStr = match[1];
+  const rowStr = match[2];
+  
+  let col = 0;
+  for (let i = 0; i < colStr.length; i++) {
+    col = col * 26 + (colStr.charCodeAt(i) - 64);
+  }
+  const row = parseInt(rowStr, 10);
+  return { col, row }; // 1-indexed
+};
+
 /**
- * 指定された範囲のセルデータを取得する
+ * 左上と右下のセルを指定して取得する (主にリスト用)
  */
 function getCellsFromRange(workbook: ExcelJS.Workbook, range: RangeDef): ExcelCellData[][] | null {
   if (!range.sheetName || !range.startCell || !range.endCell) return null;
   const worksheet = workbook.getWorksheet(range.sheetName);
   if (!worksheet) return null;
 
-  // A1形式を解釈
-  const parseCellRef = (ref: string) => {
-    const match = ref.toUpperCase().match(/^([A-Z]+)(\d+)$/);
-    if (!match) return null;
-    const colStr = match[1];
-    const rowStr = match[2];
-    
-    let col = 0;
-    for (let i = 0; i < colStr.length; i++) {
-      col = col * 26 + (colStr.charCodeAt(i) - 64);
-    }
-    const row = parseInt(rowStr, 10);
-    return { col, row }; // 1-indexed
-  };
-
   const start = parseCellRef(range.startCell);
   const end = parseCellRef(range.endCell);
-  
   if (!start || !end) return null;
 
   const minR = Math.min(start.row, end.row);
@@ -130,12 +124,7 @@ function getCellsFromRange(workbook: ExcelJS.Workbook, range: RangeDef): ExcelCe
       const isAnswerCell = !!bgColor && bgColor !== '00000000' && bgColor !== 'FFFFFFFF';
       
       cells2D[r - minR][c - minC] = {
-        row: r,
-        col: c,
-        value,
-        text,
-        backgroundColor: bgColor,
-        isAnswerCell
+        row: r, col: c, value, text, backgroundColor: bgColor, isAnswerCell
       };
     }
   }
@@ -144,8 +133,39 @@ function getCellsFromRange(workbook: ExcelJS.Workbook, range: RangeDef): ExcelCe
 }
 
 /**
- * 手動で指定された範囲のセルデータからPuzzleDataを生成する
+ * 左上セルと幅・高さを指定して取得する (問題面・解答面用)
  */
+function getCellsFromStartAndSize(workbook: ExcelJS.Workbook, sheetName: string, startCell: string, width: number, height: number): ExcelCellData[][] | null {
+  if (!sheetName || !startCell) return null;
+  const worksheet = workbook.getWorksheet(sheetName);
+  if (!worksheet) return null;
+
+  const start = parseCellRef(startCell);
+  if (!start) return null;
+
+  const minR = start.row;
+  const maxR = start.row + height - 1;
+  const minC = start.col;
+  const maxC = start.col + width - 1;
+
+  const cells2D: ExcelCellData[][] = Array(height).fill(null).map(() => Array(width).fill(null));
+
+  for (let r = minR; r <= maxR; r++) {
+    for (let c = minC; c <= maxC; c++) {
+      const cell = worksheet.getCell(r, c);
+      const { value, text } = extractCellValue(cell);
+      const bgColor = getCellBackgroundColor(cell);
+      const isAnswerCell = !!bgColor && bgColor !== '00000000' && bgColor !== 'FFFFFFFF';
+      
+      cells2D[r - minR][c - minC] = {
+        row: r, col: c, value, text, backgroundColor: bgColor, isAnswerCell
+      };
+    }
+  }
+
+  return cells2D;
+}
+
 export function convertManualImportToPuzzle(
   currentPuzzle: PuzzleData,
   workbook: ExcelJS.Workbook,
@@ -153,9 +173,26 @@ export function convertManualImportToPuzzle(
 ): PuzzleData {
   const newPuzzle = { ...currentPuzzle };
 
-  const problemCells = config.problemRange ? getCellsFromRange(workbook, config.problemRange) : null;
+  const boardWidth = config.boardWidth;
+  const boardHeight = config.boardHeight;
+  const pType = config.problemPatternType;
+  const aType = config.answerPatternType;
+
+  let problemCells: ExcelCellData[][] | null = null;
+  if (config.problemRange) {
+     const pW = pType === 3 ? boardWidth * 3 : boardWidth;
+     const pH = pType === 2 ? boardHeight * 2 : (pType === 3 ? boardHeight * 3 : boardHeight);
+     problemCells = getCellsFromStartAndSize(workbook, config.problemRange.sheetName, config.problemRange.startCell, pW, pH);
+  }
+
+  let answerCells: ExcelCellData[][] | null = null;
+  if (config.answerRange) {
+     const aW = aType === 3 ? boardWidth * 3 : boardWidth;
+     const aH = aType === 2 ? boardHeight * 2 : (aType === 3 ? boardHeight * 3 : boardHeight);
+     answerCells = getCellsFromStartAndSize(workbook, config.answerRange.sheetName, config.answerRange.startCell, aW, aH);
+  }
+
   const listCells = config.listRange ? getCellsFromRange(workbook, config.listRange) : null;
-  const answerCells = config.answerRange ? getCellsFromRange(workbook, config.answerRange) : null;
 
   // 1. リストの反映
   if (listCells) {
@@ -163,7 +200,6 @@ export function convertManualImportToPuzzle(
     const width = listCells[0].length;
     const height = listCells.length;
     
-    // 縦または横の1, 2, 3...の隣のテキストを拾う
     for (let r = 0; r < height; r++) {
       for (let c = 0; c < width; c++) {
         const cell = listCells[r][c];
@@ -175,13 +211,19 @@ export function convertManualImportToPuzzle(
             if (rest.length > 0) {
               newWordList[num] = rest;
             } else {
-              const rightCell = c + 1 < width ? listCells[r][c+1] : null;
-              const downCell = r + 1 < height ? listCells[r+1][c] : null;
+              const rightCell1 = c + 1 < width ? listCells[r][c+1] : null;
+              const rightCell2 = c + 2 < width ? listCells[r][c+2] : null;
+              const downCell1 = r + 1 < height ? listCells[r+1][c] : null;
+              const downCell2 = r + 2 < height ? listCells[r+2][c] : null;
               
-              if (rightCell && rightCell.text.trim() !== '') {
-                 newWordList[num] = rightCell.text.trim();
-              } else if (downCell && downCell.text.trim() !== '') {
-                 newWordList[num] = downCell.text.trim();
+              if (rightCell1 && rightCell1.text.trim() !== '') {
+                 newWordList[num] = rightCell1.text.trim();
+              } else if (rightCell2 && rightCell2.text.trim() !== '') {
+                 newWordList[num] = rightCell2.text.trim();
+              } else if (downCell1 && downCell1.text.trim() !== '') {
+                 newWordList[num] = downCell1.text.trim();
+              } else if (downCell2 && downCell2.text.trim() !== '') {
+                 newWordList[num] = downCell2.text.trim();
               }
             }
           }
@@ -192,116 +234,119 @@ export function convertManualImportToPuzzle(
   }
 
   // 2. 盤面の反映
-  if (problemCells) {
-    const patternType = config.patternType;
-    newPuzzle.patternType = patternType;
-    
-    const blockWidth = problemCells[0].length;
-    const blockHeight = problemCells.length;
-    
-    let boardWidth = blockWidth;
-    let boardHeight = blockHeight;
-    
-    if (patternType === 2) {
-      boardHeight = Math.floor(blockHeight / 2);
-    } else if (patternType === 3) {
-      boardWidth = Math.floor(blockWidth / 3);
-      boardHeight = Math.floor(blockHeight / 3);
-    }
-    
-    newPuzzle.width = boardWidth;
-    newPuzzle.height = boardHeight;
-    
-    const newCells: Cell[][] = Array(boardHeight).fill(null).map((_, y) => 
-      Array(boardWidth).fill(null).map((_, x) => ({
-        x, y, type: 'normal', char: '', answerChar: '',
-        isNumbered: false, number: null, answerKey: null,
-        style: {}
-      }))
-    );
-    
-    for (let y = 0; y < boardHeight; y++) {
-      for (let x = 0; x < boardWidth; x++) {
-        const cell = newCells[y][x];
-        
-        let targetCells: (ExcelCellData | null)[] = [];
-        let targetAnswerCells: (ExcelCellData | null)[] = [];
-        if (patternType === 1) {
+  newPuzzle.width = boardWidth;
+  newPuzzle.height = boardHeight;
+  newPuzzle.patternType = pType;
+
+  const newCells: Cell[][] = Array(boardHeight).fill(null).map((_, y) => 
+    Array(boardWidth).fill(null).map((_, x) => ({
+      x, y, type: 'normal', char: '', answerChar: '',
+      isNumbered: false, number: null, answerKey: null,
+      style: {}
+    }))
+  );
+
+  for (let y = 0; y < boardHeight; y++) {
+    for (let x = 0; x < boardWidth; x++) {
+      const cell = newCells[y][x];
+      
+      let targetCells: (ExcelCellData | null)[] = [];
+      let targetAnswerCells: (ExcelCellData | null)[] = [];
+      
+      if (problemCells) {
+        if (pType === 1) {
           targetCells.push(problemCells[y][x]);
-          if (answerCells && answerCells[y] && answerCells[y][x]) {
-             targetAnswerCells.push(answerCells[y][x]);
-          }
-        } else if (patternType === 2) {
+        } else if (pType === 2) {
           targetCells.push(problemCells[y*2][x]);
           targetCells.push(problemCells[y*2+1][x]);
-          if (answerCells && answerCells[y*2]) {
-             targetAnswerCells.push(answerCells[y*2][x]);
-             targetAnswerCells.push(answerCells[y*2+1]?.[x] || null);
-          }
-        } else if (patternType === 3) {
+        } else if (pType === 3) {
           for(let dy=0; dy<3; dy++){
              for(let dx=0; dx<3; dx++){
                 targetCells.push(problemCells[y*3+dy][x*3+dx]);
-                if (answerCells && answerCells[y*3+dy]) {
-                   targetAnswerCells.push(answerCells[y*3+dy][x*3+dx]);
-                }
              }
           }
         }
+      }
+
+      if (answerCells) {
+        if (aType === 1) {
+          targetAnswerCells.push(answerCells[y][x]);
+        } else if (aType === 2) {
+          targetAnswerCells.push(answerCells[y*2][x]);
+          targetAnswerCells.push(answerCells[y*2+1]?.[x] || null);
+        } else if (aType === 3) {
+          for(let dy=0; dy<3; dy++){
+             for(let dx=0; dx<3; dx++){
+                targetAnswerCells.push(answerCells[y*3+dy][x*3+dx]);
+             }
+          }
+        }
+      }
+      
+      // 問題面の文字・数字解析
+      const activeCells = targetCells.filter(c => c && c.text !== '');
+      if (activeCells.length > 0) {
+        activeCells.forEach(c => {
+           const t = c!.text.trim();
+           if (t === '') return;
+
+           const match = t.match(/^(\d+)[\.\s]*(.*)$/);
+           if (match) {
+               cell.isNumbered = true;
+               cell.number = Number(match[1]);
+               const rest = match[2].trim();
+               if (rest) {
+                   if (/^[A-ZＡ-Ｚ]$/i.test(rest)) {
+                      cell.answerKey = String.fromCharCode(rest.toUpperCase().charCodeAt(0) - (rest >= 'Ａ' ? 0xFEE0 : 0));
+                   } else {
+                      cell.char = rest.charAt(0);
+                   }
+               }
+           } else if (/^[A-ZＡ-Ｚ]$/i.test(t) || c!.isAnswerCell) {
+               if (/^[A-ZＡ-Ｚ]$/i.test(t)) {
+                  cell.answerKey = String.fromCharCode(t.toUpperCase().charCodeAt(0) - (t >= 'Ａ' ? 0xFEE0 : 0));
+               }
+           } else {
+               cell.char = t.charAt(0);
+           }
+        });
         
-        // 1つでも有効なセルがあれば 'normal' (現在は初期値がnormalなので変更不要だが、念のため)
-        const activeCells = targetCells.filter(c => c && c.text !== '');
-        if (activeCells.length > 0) {
-          activeCells.forEach(c => {
+        const coloredCell = activeCells.find(c => c!.isAnswerCell);
+        if (coloredCell && coloredCell.backgroundColor) {
+           cell.style.backgroundColor = '#' + coloredCell.backgroundColor.slice(2);
+        }
+      }
+
+      // 解答面の文字解析
+      if (answerCells) {
+         const activeAnswerCells = targetAnswerCells.filter(c => c && c.text.trim() !== '');
+         activeAnswerCells.forEach(c => {
              const t = c!.text.trim();
              if (t === '') return;
 
-             const match = t.match(/^(\d+)[\.\s]*(.*)$/);
-             if (match) {
-                 cell.isNumbered = true;
-                 cell.number = Number(match[1]);
-                 const rest = match[2].trim();
-                 if (rest) {
-                     if (/^[A-ZＡ-Ｚ]$/i.test(rest)) {
-                        cell.answerKey = String.fromCharCode(rest.toUpperCase().charCodeAt(0) - (rest >= 'Ａ' ? 0xFEE0 : 0));
-                     } else {
-                        cell.char = rest.charAt(0);
-                     }
-                 }
-             } else if (/^[A-ZＡ-Ｚ]$/i.test(t) || c!.isAnswerCell) {
-                 if (/^[A-ZＡ-Ｚ]$/i.test(t)) {
-                    cell.answerKey = String.fromCharCode(t.toUpperCase().charCodeAt(0) - (t >= 'Ａ' ? 0xFEE0 : 0));
-                 }
-             } else {
-                 cell.char = t.charAt(0);
+             // 数字と同居しているケース（例: "15 漢"）を考慮して数字を分離
+             const numMatch = t.match(/^(\d+)[\.\s]*(.*)$/);
+             let actualCharPart = t;
+             if (numMatch) {
+                 actualCharPart = numMatch[2].trim();
              }
-          });
-          
-          const coloredCell = activeCells.find(c => c!.isAnswerCell);
-          if (coloredCell && coloredCell.backgroundColor) {
-             cell.style.backgroundColor = '#' + coloredCell.backgroundColor.slice(2);
-          }
-        }
 
-        if (answerCells) {
-           const activeAnswerCells = targetAnswerCells.filter(c => c && c.text.trim() !== '');
-           activeAnswerCells.forEach(c => {
-               const t = c!.text.trim();
-               if (!/^[A-ZＡ-Ｚ]$/i.test(t)) {
-                   const charMatch = t.match(/[^\dA-ZＡ-Ｚ\s\.]/i);
-                   if (charMatch && !cell.answerChar) {
-                       cell.answerChar = charMatch[0];
-                   } else if (!cell.answerChar) {
-                       cell.answerChar = t.charAt(0);
-                   }
-               }
-           });
-        }
+             // アルファベット1文字だけのセルはラベル（A, B, C...）の可能性が高いので無視
+             if (!/^[A-ZＡ-Ｚ]$/i.test(actualCharPart) && actualCharPart.length > 0) {
+                 // 記号や数字、アルファベット以外の「文字（漢字・かな等）」を優先的に探す
+                 const charOnlyMatch = actualCharPart.match(/[^\dA-ZＡ-Ｚ\s\.\-]/i);
+                 if (charOnlyMatch && !cell.answerChar) {
+                     cell.answerChar = charOnlyMatch[0];
+                 } else if (!cell.answerChar) {
+                     // 候補が見つからない場合は1文字目（ただしラベルでないもの）を採用
+                     cell.answerChar = actualCharPart.charAt(0);
+                 }
+             }
+         });
       }
     }
-    
-    newPuzzle.cells = newCells;
   }
 
+  newPuzzle.cells = newCells;
   return newPuzzle;
 }

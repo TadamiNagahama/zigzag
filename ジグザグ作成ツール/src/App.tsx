@@ -1288,9 +1288,14 @@ function App() {
 
   const handleImportConfirm = (config: ManualImportConfig) => {
     if (!importResult) return;
-    const newPuzzle = convertManualImportToPuzzle(puzzle, importResult.workbook, config);
-    setPuzzle(newPuzzle);
-    setImportResult(null);
+    try {
+      const newPuzzle = convertManualImportToPuzzle(puzzle, importResult.workbook, config);
+      setPuzzle(newPuzzle);
+      setImportResult(null);
+    } catch (e: any) {
+      alert("インポート中にエラーが発生しました:\n" + e.message + "\n\nスタックトレース:\n" + e.stack);
+      console.error(e);
+    }
   };
 
   return (
@@ -2144,6 +2149,7 @@ function App() {
       {importResult && (
         <ImportPreviewDialog
           importResult={importResult}
+          currentPuzzle={puzzle}
           onClose={() => setImportResult(null)}
           onImport={handleImportConfirm}
         />
