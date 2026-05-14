@@ -22,7 +22,7 @@ import type { ManualImportConfig } from './utils/excelImport'
 import { auth, dbFirestore, googleProvider } from './models/firebase'
 import { signInWithPopup, signOut, onAuthStateChanged, type User } from 'firebase/auth'
 import { collection, addDoc, getDocs, query, where, deleteDoc, doc, updateDoc } from 'firebase/firestore'
-import { type PuzzleData, type PrintOptions, type Cell } from './models/types'
+import { type PuzzleData, type PrintOptions, type Cell, APP_VERSION } from './models/types'
 import { Settings, ZoomIn, ZoomOut, Maximize, Plus, Printer, Grid3X3 } from 'lucide-react'
 import './App.css'
 type AppMode = 'shade' | 'edit' | 'answer';
@@ -117,23 +117,56 @@ function App() {
     // 経路探索（最大2つまで取得）
     const findAllPaths = (word: string, x: number, y: number, visited: Set<string>, currentPath: { x: number, y: number }[]): { x: number, y: number }[][] => {
       if (x < 0 || x >= puzzle.width || y < 0 || y >= puzzle.height) return [];
+      
       const cell = puzzle.cells[y][x];
-      const currentChar = cell.char || cell.answerChar;
-      if (cell.type !== 'normal' || currentChar !== word[0]) return [];
+      const px = cell.mergedParent ? cell.mergedParent.x : x;
+      const py = cell.mergedParent ? cell.mergedParent.y : y;
+      const parentCell = puzzle.cells[py][px];
 
-      const key = `${x},${y}`;
+      if (parentCell.type !== 'normal') return [];
+      const currentChar = parentCell.char || parentCell.answerChar;
+      if (currentChar !== word[0]) return [];
+
+      const key = `${px},${py}`;
       if (visited.has(key)) return [];
 
-      const newPath = [...currentPath, { x, y }];
+      const newPath = [...currentPath, { x: px, y: py }];
       if (word.length === 1) return [newPath];
 
       const newVisited = new Set(visited);
       newVisited.add(key);
 
       const res: { x: number, y: number }[][] = [];
-      for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
-        const sub = findAllPaths(word.slice(1), x + dx, y + dy, newVisited, newPath);
-        res.push(...sub);
+      
+      // 結合範囲の全てのマスをリストアップ
+      const groupCells: { x: number, y: number }[] = [];
+      if (parentCell.mergedSize) {
+        for (let dy = 0; dy < parentCell.mergedSize.height; dy++) {
+          for (let dx = 0; dx < parentCell.mergedSize.width; dx++) {
+            groupCells.push({ x: px + dx, y: py + dy });
+          }
+        }
+      } else {
+        groupCells.push({ x: px, y: py });
+      }
+
+      const neighbors = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+      for (const gc of groupCells) {
+        for (const [dx, dy] of neighbors) {
+          const nx = gc.x + dx;
+          const ny = gc.y + dy;
+          if (nx < 0 || nx >= puzzle.width || ny < 0 || ny >= puzzle.height) continue;
+          
+          const nCell = puzzle.cells[ny][nx];
+          if (nCell.type !== 'normal') continue;
+          const npx = nCell.mergedParent ? nCell.mergedParent.x : nx;
+          const npy = nCell.mergedParent ? nCell.mergedParent.y : ny;
+          if (npx === px && npy === py) continue;
+
+          const sub = findAllPaths(word.slice(1), nx, ny, newVisited, newPath);
+          res.push(...sub);
+          if (res.length >= 2) break;
+        }
         if (res.length >= 2) break;
       }
       return res;
@@ -142,11 +175,17 @@ function App() {
     // どこまで辿れたかを確認（エラーメッセージ用）
     const getMaxDepth = (word: string, x: number, y: number, visited: Set<string>, depth: number): number => {
       if (x < 0 || x >= puzzle.width || y < 0 || y >= puzzle.height) return depth;
+      
       const cell = puzzle.cells[y][x];
-      const currentChar = cell.char || cell.answerChar;
-      if (cell.type !== 'normal' || currentChar !== word[0]) return depth;
+      const px = cell.mergedParent ? cell.mergedParent.x : x;
+      const py = cell.mergedParent ? cell.mergedParent.y : y;
+      const parentCell = puzzle.cells[py][px];
 
-      const key = `${x},${y}`;
+      if (parentCell.type !== 'normal') return depth;
+      const currentChar = parentCell.char || parentCell.answerChar;
+      if (currentChar !== word[0]) return depth;
+
+      const key = `${px},${py}`;
       if (visited.has(key)) return depth;
 
       if (word.length === 1) return depth + 1;
@@ -155,8 +194,34 @@ function App() {
       newVisited.add(key);
 
       let max = depth + 1;
-      for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
-        max = Math.max(max, getMaxDepth(word.slice(1), x + dx, y + dy, newVisited, depth + 1));
+      
+      // 結合範囲の全てのマスをリストアップ
+      const groupCells: { x: number, y: number }[] = [];
+      if (parentCell.mergedSize) {
+        for (let dy = 0; dy < parentCell.mergedSize.height; dy++) {
+          for (let dx = 0; dx < parentCell.mergedSize.width; dx++) {
+            groupCells.push({ x: px + dx, y: py + dy });
+          }
+        }
+      } else {
+        groupCells.push({ x: px, y: py });
+      }
+
+      const neighbors = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+      for (const gc of groupCells) {
+        for (const [dx, dy] of neighbors) {
+          const nx = gc.x + dx;
+          const ny = gc.y + dy;
+          if (nx < 0 || nx >= puzzle.width || ny < 0 || ny >= puzzle.height) continue;
+          
+          const nCell = puzzle.cells[ny][nx];
+          if (nCell.type !== 'normal') continue;
+          const npx = nCell.mergedParent ? nCell.mergedParent.x : nx;
+          const npy = nCell.mergedParent ? nCell.mergedParent.y : ny;
+          if (npx === px && npy === py) continue;
+
+          max = Math.max(max, getMaxDepth(word.slice(1), nx, ny, newVisited, depth + 1));
+        }
       }
       return max;
     };
@@ -256,6 +321,10 @@ function App() {
     const targetCell = puzzle.cells[targetY]?.[targetX];
     if (!targetCell || targetCell.type !== 'normal') return [];
 
+    // ターゲットマスの論理座標（親マスの座標）
+    const targetPX = targetCell.mergedParent ? targetCell.mergedParent.x : targetX;
+    const targetPY = targetCell.mergedParent ? targetCell.mergedParent.y : targetY;
+
     const matches: { num: number, index: number }[] = [];
     const usedNumbers = new Set<number>();
     puzzle.cells.forEach(row => row.forEach(c => {
@@ -280,25 +349,57 @@ function App() {
       let maxFoundIndex = -1;
       const dfs = (x: number, y: number, charIndex: number, visited: Set<string>) => {
         if (x < 0 || x >= puzzle.width || y < 0 || y >= puzzle.height) return;
+        
         const cell = puzzle.cells[y][x];
-        if (cell.type !== 'normal') return;
+        const px = cell.mergedParent ? cell.mergedParent.x : x;
+        const py = cell.mergedParent ? cell.mergedParent.y : y;
+        const parentCell = puzzle.cells[py][px];
 
-        const playerChar = (appMode === 'answer' && !isCheckMode) ? (cell.answerChar || cell.char) : cell.char;
-        const cellChar = playerChar || (cell.number === num ? word[0] : (cell.number ? puzzle.wordList[cell.number]?.[0] : ''));
+        if (parentCell.type !== 'normal') return;
+
+        const playerChar = (appMode === 'answer' && !isCheckMode) ? (parentCell.answerChar || parentCell.char) : parentCell.char;
+        const cellChar = playerChar || (parentCell.number === num ? word[0] : (parentCell.number ? puzzle.wordList[parentCell.number]?.[0] : ''));
         if (cellChar !== word[charIndex]) return;
 
-        const key = `${x},${y}`;
+        const key = `${px},${py}`;
         if (visited.has(key)) return;
 
-        if (x === targetX && y === targetY) {
+        if (px === targetPX && py === targetPY) {
           if (charIndex > maxFoundIndex) maxFoundIndex = charIndex;
         }
 
         if (charIndex + 1 < word.length) {
           const newVisited = new Set(visited);
           newVisited.add(key);
-          for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
-            dfs(x + dx, y + dy, charIndex + 1, newVisited);
+
+          // 結合範囲の全てのマスをリストアップ
+          const groupCells: { x: number, y: number }[] = [];
+          if (parentCell.mergedSize) {
+            for (let dy = 0; dy < parentCell.mergedSize.height; dy++) {
+              for (let dx = 0; dx < parentCell.mergedSize.width; dx++) {
+                groupCells.push({ x: px + dx, y: py + dy });
+              }
+            }
+          } else {
+            groupCells.push({ x: px, y: py });
+          }
+
+          const neighbors = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+          for (const gc of groupCells) {
+            for (const [dx, dy] of neighbors) {
+              const nx = gc.x + dx;
+              const ny = gc.y + dy;
+              if (nx < 0 || nx >= puzzle.width || ny < 0 || ny >= puzzle.height) continue;
+              
+              const nCell = puzzle.cells[ny][nx];
+              if (nCell.type !== 'normal') continue;
+              
+              const npx = nCell.mergedParent ? nCell.mergedParent.x : nx;
+              const npy = nCell.mergedParent ? nCell.mergedParent.y : ny;
+              
+              if (npx === px && npy === py) continue;
+              dfs(nx, ny, charIndex + 1, newVisited);
+            }
           }
         }
       };
@@ -331,17 +432,22 @@ function App() {
     let bestPath: { x: number, y: number }[] = [];
     const dfs = (x: number, y: number, charIndex: number, currentPath: { x: number, y: number }[], visited: Set<string>) => {
       if (x < 0 || x >= puzzle.width || y < 0 || y >= puzzle.height) return;
+      
       const cell = puzzle.cells[y][x];
-      if (cell.type !== 'normal') return;
+      const px = cell.mergedParent ? cell.mergedParent.x : x;
+      const py = cell.mergedParent ? cell.mergedParent.y : y;
+      const parentCell = puzzle.cells[py][px];
 
-      const playerChar = (appMode === 'answer' && !isCheckMode) ? (cell.answerChar || cell.char) : cell.char;
-      const cellChar = playerChar || (cell.number === num ? word[0] : (cell.number ? puzzle.wordList[cell.number]?.[0] : ''));
+      if (parentCell.type !== 'normal') return;
+
+      const playerChar = (appMode === 'answer' && !isCheckMode) ? (parentCell.answerChar || parentCell.char) : parentCell.char;
+      const cellChar = playerChar || (parentCell.number === num ? word[0] : (parentCell.number ? puzzle.wordList[parentCell.number]?.[0] : ''));
       if (cellChar !== word[charIndex]) return;
 
-      const key = `${x},${y}`;
+      const key = `${px},${py}`;
       if (visited.has(key)) return;
 
-      const newPath = [...currentPath, { x, y }];
+      const newPath = [...currentPath, { x: px, y: py }];
       if (newPath.length > bestPath.length) {
         bestPath = newPath;
       }
@@ -349,8 +455,36 @@ function App() {
       if (charIndex + 1 < word.length) {
         const newVisited = new Set(visited);
         newVisited.add(key);
-        for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
-          dfs(x + dx, y + dy, charIndex + 1, newPath, newVisited);
+
+        // 結合範囲の全てのマスをリストアップ
+        const groupCells: { x: number, y: number }[] = [];
+        if (parentCell.mergedSize) {
+          for (let dy = 0; dy < parentCell.mergedSize.height; dy++) {
+            for (let dx = 0; dx < parentCell.mergedSize.width; dx++) {
+              groupCells.push({ x: px + dx, y: py + dy });
+            }
+          }
+        } else {
+          groupCells.push({ x: px, y: py });
+        }
+
+        const neighbors = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+        for (const gc of groupCells) {
+          for (const [dx, dy] of neighbors) {
+            const nx = gc.x + dx;
+            const ny = gc.y + dy;
+            if (nx < 0 || nx >= puzzle.width || ny < 0 || ny >= puzzle.height) continue;
+            
+            const nCell = puzzle.cells[ny][nx];
+            if (nCell.type !== 'normal') continue;
+            
+            const npx = nCell.mergedParent ? nCell.mergedParent.x : nx;
+            const npy = nCell.mergedParent ? nCell.mergedParent.y : ny;
+            
+            if (npx === px && npy === py) continue;
+            dfs(nx, ny, charIndex + 1, newPath, newVisited);
+            if (bestPath.length === word.length) return;
+          }
         }
       }
     };
@@ -1250,21 +1384,51 @@ function App() {
 
           const hasShadedPath = (w: string, x: number, y: number, visited: Set<string>): boolean => {
             if (w === '') return true;
-            if (!shadedCells.has(`${x},${y}`)) return false;
+            if (x < 0 || x >= puzzle.width || y < 0 || y >= puzzle.height) return false;
+            
             const cell = puzzle.cells[y][x];
-            const currentChar = cell.char || cell.answerChar;
+            const px = cell.mergedParent ? cell.mergedParent.x : x;
+            const py = cell.mergedParent ? cell.mergedParent.y : y;
+            const parentCell = puzzle.cells[py][px];
+
+            if (!parentCell.isShaded) return false;
+            const currentChar = parentCell.char || parentCell.answerChar;
             if (currentChar !== w[0]) return false;
 
-            const key = `${x},${y}`;
+            const key = `${px},${py}`;
             if (visited.has(key)) return false;
             const newVisited = new Set(visited);
             newVisited.add(key);
             const nextW = w.slice(1);
             if (nextW === '') return true;
 
+            // 結合範囲の全てのマスをリストアップ
+            const groupCells: { x: number, y: number }[] = [];
+            if (parentCell.mergedSize) {
+              for (let dy = 0; dy < parentCell.mergedSize.height; dy++) {
+                for (let dx = 0; dx < parentCell.mergedSize.width; dx++) {
+                  groupCells.push({ x: px + dx, y: py + dy });
+                }
+              }
+            } else {
+              groupCells.push({ x: px, y: py });
+            }
+
             const neighbors = [[0, 1], [0, -1], [1, 0], [-1, 0]];
-            for (const [dx, dy] of neighbors) {
-              if (hasShadedPath(nextW, x + dx, y + dy, newVisited)) return true;
+            for (const gc of groupCells) {
+              for (const [dx, dy] of neighbors) {
+                const nx = gc.x + dx;
+                const ny = gc.y + dy;
+                if (nx < 0 || nx >= puzzle.width || ny < 0 || ny >= puzzle.height) continue;
+                
+                const nCell = puzzle.cells[ny][nx];
+                if (nCell.type !== 'normal') continue;
+                const npx = nCell.mergedParent ? nCell.mergedParent.x : nx;
+                const npy = nCell.mergedParent ? nCell.mergedParent.y : ny;
+                if (npx === px && npy === py) continue;
+
+                if (hasShadedPath(nextW, nx, ny, newVisited)) return true;
+              }
             }
             return false;
           };
@@ -2568,7 +2732,7 @@ function App() {
           onSetFontWeight={setBoardFontWeight}
           onSetFontFamily={setBoardFontFamily}
           onSetCloudAutoSave={setCloudAutoSave}
-          version="1.1.0"
+          version={APP_VERSION}
         />
       )}
 
@@ -2753,7 +2917,7 @@ function App() {
               borderTop: '1px solid var(--border-color)',
               paddingTop: '12px'
             }}>
-              Version 1.1.0
+              Version {APP_VERSION}
             </div>
           </div>
         </div>

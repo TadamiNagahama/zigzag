@@ -1,3 +1,4 @@
+export const APP_VERSION = '1.1.1';
 export type CellType = 'normal' | 'wall';
 
 export interface CellStyle {

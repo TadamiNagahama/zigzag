@@ -1,5 +1,6 @@
 import React from 'react';
 import { X, Type } from 'lucide-react';
+import { APP_VERSION } from '../models/types';
 
 interface SettingsDialogProps {
   shadingColor: string;
@@ -40,7 +41,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   onSetFontWeight,
   onSetFontFamily,
   onSetCloudAutoSave,
-  version = '1.1.0'
+  version = APP_VERSION
 }) => {
   return (
     <div className="modal-overlay" style={{ zIndex: 3000 }}>
