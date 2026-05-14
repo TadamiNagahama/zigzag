@@ -22,7 +22,7 @@ import type { ManualImportConfig } from './utils/excelImport'
 import { auth, dbFirestore, googleProvider } from './models/firebase'
 import { signInWithPopup, signOut, onAuthStateChanged, type User } from 'firebase/auth'
 import { collection, addDoc, getDocs, query, where, deleteDoc, doc, updateDoc } from 'firebase/firestore'
-import { type PuzzleData, type PrintOptions } from './models/types'
+import { type PuzzleData, type PrintOptions, type Cell } from './models/types'
 import { Settings, ZoomIn, ZoomOut, Maximize, Plus, Printer, Grid3X3 } from 'lucide-react'
 import './App.css'
 type AppMode = 'shade' | 'edit' | 'answer';
@@ -53,6 +53,7 @@ function App() {
   const {
     puzzle,
     setPuzzle,
+    pushPuzzle,
     resizeBoard,
     toggleCellType,
     toggleNumberFlag,
@@ -230,6 +231,14 @@ function App() {
   const [showMobileSettingsMenu, setShowMobileSettingsMenu] = useState(false);
   const [importResult, setImportResult] = useState<ExcelImportResult | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isCheckMode, setIsCheckMode] = useState(false);
+  const [solveMethod, setSolveMethod] = useState<'self' | 'auto'>('self');
+  const [checkpointCells, setCheckpointCells] = useState<Cell[][] | null>(null);
+  const [currentSolveNumber, setCurrentSolveNumber] = useState<number | null>(null);
+  const [solveCandidates, setSolveCandidates] = useState<number[]>([]);
+  const [solveCandidateIndex, setSolveCandidateIndex] = useState(0);
+  const [savedSelfSolveCells, setSavedSelfSolveCells] = useState<Cell[][] | null>(null);
+  const [selfSolveConfirm, setSelfSolveConfirm] = useState<{ message: string, onYes: () => void, onNo: () => void } | null>(null);
 
   // クラウド自動保存の設定（デフォルトOFF）
   const [cloudAutoSave, setCloudAutoSave] = useState(() => {
@@ -240,6 +249,224 @@ function App() {
   const [lastExportFileName, setLastExportFileName] = useState<string | null>(() => {
     return localStorage.getItem('zigzag_last_export_filename');
   });
+
+  // 盤面の各マスがどの単語番号（リスト番号）に含まれるかを計算
+  const { wordCoverageMap, wordCharIndexMap } = useMemo(() => {
+    const map: Record<string, number[]> = {};
+    const charIdxMap: Record<string, Record<number, number>> = {}; // key: "x,y" -> { wordNum: charIndex }
+    
+    // 使用されている番号を抽出
+    const usedNumbers = new Set<number>();
+    puzzle.cells.forEach(row => row.forEach(cell => {
+      if (cell.number !== null) usedNumbers.add(cell.number);
+    }));
+
+    // 白紙の盤面から、数字と単語リスト、隣接関係のみを元に正解パスを導き出す
+    const findZigzagPath = (num: number, word: string, px: number, py: number, visited: Set<string>, currentPath: { x: number, y: number }[]): { x: number, y: number }[] | null => {
+      if (px < 0 || px >= puzzle.width || py < 0 || py >= puzzle.height) return null;
+      const cell = puzzle.cells[py][px];
+      
+      // 壁は通れない
+      if (cell.type !== 'normal') return null;
+
+      // すでに通ったマスは通れない
+      const key = `${px},${py}`;
+      if (visited.has(key)) return null;
+
+      // 1文字目（数字マス）以外で、別の数字マスにぶつかるのはジグザグのルール上NG
+      if (currentPath.length > 0 && cell.number !== null) return null;
+
+      const newPath = [...currentPath, { x: px, y: py }];
+      
+      // 文字数が一致すれば成功
+      if (word.length === newPath.length) return newPath;
+
+      const newVisited = new Set(visited);
+      newVisited.add(key);
+
+      // 上下左右を探索
+      for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+        const res = findZigzagPath(num, word, px + dx, py + dy, newVisited, newPath);
+        if (res) return res;
+      }
+      return null;
+    };
+
+    Array.from(usedNumbers).forEach(num => {
+      const word = puzzle.wordList[num];
+      if (!word || word.trim() === '') return;
+
+      let startPos: { x: number, y: number } | null = null;
+      for (let y = 0; y < puzzle.height; y++) {
+        for (let x = 0; x < puzzle.width; x++) {
+          if (puzzle.cells[y][x].number === num) {
+            startPos = { x, y };
+            break;
+          }
+        }
+        if (startPos) break;
+      }
+
+      if (startPos) {
+        const path = findZigzagPath(num, word, startPos.x, startPos.y, new Set(), []);
+        if (path) {
+          path.forEach((p, idx) => {
+            const k = `${p.x},${p.y}`;
+            if (!map[k]) map[k] = [];
+            map[k].push(num);
+            // このセルが単語numの何文字目かを記録
+            if (!charIdxMap[k]) charIdxMap[k] = {};
+            charIdxMap[k][num] = idx;
+          });
+        }
+      }
+    });
+
+    return { wordCoverageMap: map, wordCharIndexMap: charIdxMap };
+  }, [puzzle.cells, puzzle.wordList, puzzle.width, puzzle.height]);
+
+  // ユーザーが実際に入力した（あるいは初期配置されている）文字を辿って、
+  // 特定のマスがどの単語の何文字目に該当するかを判定する関数
+  const getDrawnWordCandidates = useCallback((targetX: number, targetY: number) => {
+    const targetCell = puzzle.cells[targetY]?.[targetX];
+    if (!targetCell || targetCell.type !== 'normal') return [];
+
+    const matches: { num: number, index: number }[] = [];
+    const usedNumbers = new Set<number>();
+    puzzle.cells.forEach(row => row.forEach(c => {
+      if (c.number !== null) usedNumbers.add(c.number);
+    }));
+
+    Array.from(usedNumbers).forEach(num => {
+      const word = puzzle.wordList[num];
+      if (!word) return;
+
+      let startX = -1, startY = -1;
+      for (let y = 0; y < puzzle.height; y++) {
+        for (let x = 0; x < puzzle.width; x++) {
+          if (puzzle.cells[y][x].number === num) {
+            startX = x; startY = y; break;
+          }
+        }
+        if (startX !== -1) break;
+      }
+      if (startX === -1) return;
+
+      let maxFoundIndex = -1;
+      const dfs = (x: number, y: number, charIndex: number, visited: Set<string>) => {
+        if (x < 0 || x >= puzzle.width || y < 0 || y >= puzzle.height) return;
+        const cell = puzzle.cells[y][x];
+        if (cell.type !== 'normal') return;
+        
+        const playerChar = (appMode === 'answer' && !isCheckMode) ? (cell.answerChar || cell.char) : cell.char;
+        const cellChar = playerChar || (cell.number === num ? word[0] : (cell.number ? puzzle.wordList[cell.number]?.[0] : ''));
+        if (cellChar !== word[charIndex]) return;
+
+        const key = `${x},${y}`;
+        if (visited.has(key)) return;
+        
+        if (x === targetX && y === targetY) {
+          if (charIndex > maxFoundIndex) maxFoundIndex = charIndex;
+        }
+
+        if (charIndex + 1 < word.length) {
+          const newVisited = new Set(visited);
+          newVisited.add(key);
+          for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+            dfs(x + dx, y + dy, charIndex + 1, newVisited);
+          }
+        }
+      };
+
+      dfs(startX, startY, 0, new Set());
+
+      if (maxFoundIndex >= 0) {
+        matches.push({ num, index: maxFoundIndex });
+      }
+    });
+
+    return matches;
+  }, [puzzle.cells, puzzle.wordList, puzzle.width, puzzle.height, appMode, isCheckMode]);
+
+  const getDrawnCellsForWord = useCallback((num: number): { x: number, y: number }[] => {
+    const word = puzzle.wordList[num];
+    if (!word) return [];
+
+    let startX = -1, startY = -1;
+    for (let y = 0; y < puzzle.height; y++) {
+      for (let x = 0; x < puzzle.width; x++) {
+        if (puzzle.cells[y][x].number === num) {
+          startX = x; startY = y; break;
+        }
+      }
+      if (startX !== -1) break;
+    }
+    if (startX === -1) return [];
+
+    let bestPath: {x: number, y: number}[] = [];
+    const dfs = (x: number, y: number, charIndex: number, currentPath: {x: number, y: number}[], visited: Set<string>) => {
+      if (x < 0 || x >= puzzle.width || y < 0 || y >= puzzle.height) return;
+      const cell = puzzle.cells[y][x];
+      if (cell.type !== 'normal') return;
+      
+      const playerChar = (appMode === 'answer' && !isCheckMode) ? (cell.answerChar || cell.char) : cell.char;
+      const cellChar = playerChar || (cell.number === num ? word[0] : (cell.number ? puzzle.wordList[cell.number]?.[0] : ''));
+      if (cellChar !== word[charIndex]) return;
+
+      const key = `${x},${y}`;
+      if (visited.has(key)) return;
+
+      const newPath = [...currentPath, {x, y}];
+      if (newPath.length > bestPath.length) {
+        bestPath = newPath;
+      }
+
+      if (charIndex + 1 < word.length) {
+        const newVisited = new Set(visited);
+        newVisited.add(key);
+        for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+          dfs(x + dx, y + dy, charIndex + 1, newPath, newVisited);
+        }
+      }
+    };
+
+    dfs(startX, startY, 0, [], new Set());
+    return bestPath;
+  }, [puzzle.cells, puzzle.wordList, puzzle.width, puzzle.height, appMode, isCheckMode]);
+
+  const highlightedDrawnCells = useMemo(() => {
+    if (isCheckMode && currentSolveNumber !== null) {
+      return getDrawnCellsForWord(currentSolveNumber);
+    }
+    return [];
+  }, [isCheckMode, currentSolveNumber, getDrawnCellsForWord]);
+
+  const completedWords = useMemo(() => {
+    const completed = new Set<number>();
+    Object.keys(puzzle.wordList).forEach(numStr => {
+      const num = parseInt(numStr, 10);
+      const word = puzzle.wordList[num];
+      if (word && word.length > 0 && getDrawnCellsForWord(num).length === word.length) {
+        completed.add(num);
+      }
+    });
+    return completed;
+  }, [puzzle.wordList, getDrawnCellsForWord]);
+
+  // セルフモードで全単語が埋まったときのメッセージ
+  const prevCompletedCountRef = useRef(0);
+  useEffect(() => {
+    if (!isCheckMode) {
+      prevCompletedCountRef.current = 0;
+      return;
+    }
+    const totalWords = Object.keys(puzzle.wordList).filter(k => (puzzle.wordList[parseInt(k, 10)] || '').trim() !== '').length;
+    if (totalWords === 0) return;
+    if (completedWords.size === totalWords && prevCompletedCountRef.current < totalWords) {
+      setAlertMessage('🎉 すべての単語が埋まりました！');
+    }
+    prevCompletedCountRef.current = completedWords.size;
+  }, [completedWords.size, isCheckMode, puzzle.wordList]);
 
   // 最新のパズル状態を保持するref（setInterval用）
   const latestPuzzleRef = useRef(puzzle);
@@ -434,6 +661,12 @@ function App() {
     };
     puzzleToSave.cells = puzzle.cells.flat();
     delete puzzleToSave.id;
+    // セルフモードの記憶盤面があれば一緒に保存する
+    if (savedSelfSolveCells) {
+      puzzleToSave.savedSelfSolveCells = savedSelfSolveCells.flat();
+    } else {
+      puzzleToSave.savedSelfSolveCells = null;
+    }
 
     if (overwriteId) {
       await updateDoc(doc(dbFirestore, 'puzzles', overwriteId), puzzleToSave);
@@ -500,6 +733,19 @@ function App() {
       fitToScreen();
       setShowLoadDialog(false);
       setConfirmAction(null);
+      // 保存されていたセルフモード盤面を復元
+      const rawSaved = (p as any).savedSelfSolveCells;
+      if (rawSaved && Array.isArray(rawSaved) && rawSaved.length > 0) {
+        const h = (p as any).height;
+        const w = (p as any).width;
+        const restoredCells: Cell[][] = [];
+        for (let i = 0; i < h; i++) {
+          restoredCells.push(rawSaved.slice(i * w, (i + 1) * w));
+        }
+        setSavedSelfSolveCells(restoredCells);
+      } else {
+        setSavedSelfSolveCells(null);
+      }
     };
 
     if (isPuzzleModified) {
@@ -546,7 +792,39 @@ function App() {
     }
   }
 
+  const handleCellMouseDown = (x: number, y: number) => {
+    if (isCheckMode) {
+      const drawnCandidates = getDrawnWordCandidates(x, y);
+      if (drawnCandidates.length > 0) {
+        let nextIndex = 0;
+        // 同じマスを（マウスダウンで）押した場合は候補を切り替え
+        // 判定には focusedCell ではなく現在選択中の座標を直接使う
+        if (focusedCell?.x === x && focusedCell?.y === y && solveCandidates.length > 0) {
+          nextIndex = (solveCandidateIndex + 1) % drawnCandidates.length;
+        }
+        const selectedMatch = drawnCandidates[nextIndex];
+        setCurrentSolveNumber(selectedMatch.num);
+        setSolveCandidates(drawnCandidates.map(c => c.num));
+        setSolveCandidateIndex(nextIndex);
+        setFocusedCell({ x, y });
+
+        // リストへスクロール
+        setTimeout(() => {
+          const el = document.getElementById(`word-item-${selectedMatch.num}`);
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 10);
+      } else {
+        // 未接続の文字や空白マスをクリックした場合は選択を解除
+        setFocusedCell(null);
+        setCurrentSolveNumber(null);
+      }
+      return; // セルフモード時はここで終了
+    }
+  };
+
   const handleCellClick = (x: number, y: number) => {
+    if (isCheckMode) return; // セルフモード時はクリックでの編集を禁止
+
     if (appMode === 'answer') {
       const cell = puzzle.cells[y][x];
 
@@ -595,11 +873,20 @@ function App() {
   }
 
   const handleCellRightClick = (x: number, y: number, event: React.MouseEvent) => {
+    if (isCheckMode) {
+      event.preventDefault();
+      const cell = puzzle.cells[y][x];
+      // 文字があり、かつ数字マスでない場合のみ消去可能
+      if (cell.char && cell.number === null) {
+        updateCellChar(x, y, '');
+      }
+      return;
+    }
     setContextMenu({ x: event.clientX, y: event.clientY, cellX: x, cellY: y });
   }
 
   const handleDragSelection = (x1: number, y1: number, x2: number, y2: number) => {
-    if (appMode === 'answer') return;
+    if (appMode === 'answer' || isCheckMode) return;
 
         if (appMode === 'shade') {
           const startX = Math.min(x1, x2);
@@ -627,59 +914,104 @@ function App() {
       return;
     }
 
-    if (appMode === 'edit') {
+    if (appMode === 'edit' && !isCheckMode) {
       const first = path[0];
       const last = path[path.length - 1];
       mergeCells(first.x, first.y, last.x, last.y);
       return;
     }
 
-    if (appMode === 'answer') {
+    if (appMode === 'answer' || (appMode === 'edit' && isCheckMode)) {
       const startCell = puzzle.cells[path[0].y][path[0].x];
 
-      // 消去のトレース
-      if (startCell.answerChar && !startCell.char && !startCell.isNumbered) {
-        path.forEach(p => {
-          const cell = puzzle.cells[p.y][p.x];
-          if (!cell.isNumbered && !cell.char) {
-            updateCellAnswerChar(p.x, p.y, '');
+      // セルフモード: 解答面と同じ方式でドラッグ軌跡に沿って文字を書き込む
+      if (isCheckMode && currentSolveNumber !== null) {
+        const word = puzzle.wordList[currentSolveNumber];
+        if (!word) return;
+
+        // ドラッグ開始セルの文字インデックスを特定
+        const drawnCandidates = getDrawnWordCandidates(path[0].x, path[0].y);
+        const match = drawnCandidates.find(c => c.num === currentSolveNumber);
+        const startCharIdx = match ? match.index : 0;
+
+        // 解答面のドラッグ入力と同じロジック
+        // ユーザーのドラッグ軌跡(path)に沿って、単語の文字を順に埋める
+        pushPuzzle(prev => {
+          const newCells = prev.cells.map(row => row.map(c => ({ ...c })));
+          let currentCharIndex = startCharIdx;
+          let lastLogicalKey = "";
+
+          for (let i = 0; i < path.length; i++) {
+            const curr = path[i];
+            const cell = prev.cells[curr.y][curr.x];
+
+            const px = cell.mergedParent ? cell.mergedParent.x : curr.x;
+            const py = cell.mergedParent ? cell.mergedParent.y : curr.y;
+            const logicalKey = `${px},${py}`;
+
+            if (i > 0 && logicalKey !== lastLogicalKey) {
+              currentCharIndex++;
+            }
+            lastLogicalKey = logicalKey;
+
+            if (currentCharIndex < word.length) {
+              // 数字マスの1文字目は既に表示されているのでスキップ
+              if (i > 0 && newCells[py][px].number !== null && !newCells[py][px].mergedParent) {
+                continue;
+              }
+              newCells[py][px].char = word[currentCharIndex];
+            } else {
+              break;
+            }
           }
+          return { ...prev, cells: newCells, updatedAt: Date.now() };
         });
         return;
       }
 
-      // 自動解答のトレース
-      if (startCell.isNumbered && startCell.number !== null) {
-        const word = puzzle.wordList[startCell.number];
-        if (!word) return;
-
-        let currentCharIndex = 0;
-        let lastLogicalKey = "";
-
-        for (let i = 0; i < path.length; i++) {
-          const curr = path[i];
-          const cell = puzzle.cells[curr.y][curr.x];
-          
-          // 現在の場所の論理的な位置（結合されていれば親の座標）
-          const px = cell.mergedParent ? cell.mergedParent.x : curr.x;
-          const py = cell.mergedParent ? cell.mergedParent.y : curr.y;
-          const logicalKey = `${px},${py}`;
-
-          // 前のステップと違う論理マスに移動した場合のみ、文字インデックスを進める
-          if (i > 0 && logicalKey !== lastLogicalKey) {
-            currentCharIndex++;
-          }
-          lastLogicalKey = logicalKey;
-
-          if (currentCharIndex < word.length) {
-            const parentCell = puzzle.cells[py][px];
-            // 起点以外の数字マス（他の単語の1文字目）は上書きしない
-            if (i > 0 && parentCell.number !== null && !parentCell.mergedParent) {
-              continue;
+      // 解答面モード（既存ロジック）
+      if (appMode === 'answer') {
+        // 消去のトレース
+        if (startCell.answerChar && !startCell.char && !startCell.isNumbered) {
+          path.forEach(p => {
+            const cell = puzzle.cells[p.y][p.x];
+            if (!cell.isNumbered && !cell.char) {
+              updateCellAnswerChar(p.x, p.y, '');
             }
-            updateCellAnswerChar(px, py, word[currentCharIndex]);
-          } else {
-            break;
+          });
+          return;
+        }
+
+        // 自動解答のトレース
+        if (startCell.isNumbered && startCell.number !== null) {
+          const word = puzzle.wordList[startCell.number];
+          if (!word) return;
+
+          let currentCharIndex = 0;
+          let lastLogicalKey = "";
+
+          for (let i = 0; i < path.length; i++) {
+            const curr = path[i];
+            const cell = puzzle.cells[curr.y][curr.x];
+            
+            const px = cell.mergedParent ? cell.mergedParent.x : curr.x;
+            const py = cell.mergedParent ? cell.mergedParent.y : curr.y;
+            const logicalKey = `${px},${py}`;
+
+            if (i > 0 && logicalKey !== lastLogicalKey) {
+              currentCharIndex++;
+            }
+            lastLogicalKey = logicalKey;
+
+            if (currentCharIndex < word.length) {
+              const parentCell = puzzle.cells[py][px];
+              if (i > 0 && parentCell.number !== null && !parentCell.mergedParent) {
+                continue;
+              }
+              updateCellAnswerChar(px, py, word[currentCharIndex]);
+            } else {
+              break;
+            }
           }
         }
       }
@@ -1258,11 +1590,11 @@ function App() {
     const map: Record<string, string> = {};
     puzzle.cells.forEach(row => row.forEach(cell => {
       if (cell.answerKey) {
-        map[cell.answerKey] = cell.answerChar || '';
+        map[cell.answerKey] = isCheckMode ? (cell.char || '') : (cell.answerChar || '');
       }
     }));
     return map;
-  }, [puzzle.cells]);
+  }, [puzzle.cells, isCheckMode]);
 
 
 
@@ -1343,7 +1675,32 @@ function App() {
               <div className="hide-on-mobile" style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
                 <button
                   className={appMode === 'shade' ? 'btn-primary' : 'btn-secondary'}
-                  onClick={() => setAppMode('shade')}
+                  onClick={() => {
+                    const doSwitch = (saveCells: boolean) => {
+                      if (saveCells) {
+                        setSavedSelfSolveCells(JSON.parse(JSON.stringify(puzzle.cells)));
+                      }
+                      if (checkpointCells) {
+                        setPuzzle(p => ({ ...p, cells: checkpointCells }));
+                        setCheckpointCells(null);
+                      }
+                      setIsCheckMode(false);
+                      setCurrentSolveNumber(null);
+                      setAppMode('shade');
+                    };
+                    if (isCheckMode && checkpointCells) {
+                      const hasChanges = puzzle.cells.some((row, y) => row.some((cell, x) => cell.char !== checkpointCells[y][x].char));
+                      if (hasChanges) {
+                        setSelfSolveConfirm({
+                          message: '網掛け画面に移行します。入力した文字を記憶しますか？',
+                          onYes: () => { doSwitch(true); setSelfSolveConfirm(null); },
+                          onNo: () => { setSavedSelfSolveCells(null); doSwitch(false); setSelfSolveConfirm(null); }
+                        });
+                        return;
+                      }
+                    }
+                    doSwitch(false);
+                  }}
                   style={{ flex: 1, padding: '12px 0', fontSize: '0.9rem' }}
                 >
                   網掛け
@@ -1351,8 +1708,31 @@ function App() {
                 <button
                   className={appMode === 'edit' ? 'btn-primary' : 'btn-secondary'}
                   onClick={() => {
-                    setAppMode('edit');
-                    setFocusedCell(null);
+                    const doSwitch = (saveCells: boolean) => {
+                      if (saveCells) {
+                        setSavedSelfSolveCells(JSON.parse(JSON.stringify(puzzle.cells)));
+                      }
+                      if (checkpointCells) {
+                        setPuzzle(p => ({ ...p, cells: checkpointCells }));
+                        setCheckpointCells(null);
+                      }
+                      setIsCheckMode(false);
+                      setCurrentSolveNumber(null);
+                      setFocusedCell(null);
+                      setAppMode('edit');
+                    };
+                    if (isCheckMode && checkpointCells) {
+                      const hasChanges = puzzle.cells.some((row, y) => row.some((cell, x) => cell.char !== checkpointCells[y][x].char));
+                      if (hasChanges) {
+                        setSelfSolveConfirm({
+                          message: '問題面の編集モードへ移行します。入力した文字を記憶しますか？',
+                          onYes: () => { doSwitch(true); setSelfSolveConfirm(null); },
+                          onNo: () => { setSavedSelfSolveCells(null); doSwitch(false); setSelfSolveConfirm(null); }
+                        });
+                        return;
+                      }
+                    }
+                    doSwitch(false);
                   }}
                   style={{ flex: 1, padding: '12px 0', fontSize: '0.9rem' }}
                 >
@@ -1361,8 +1741,31 @@ function App() {
                 <button
                   className={appMode === 'answer' ? 'btn-primary' : 'btn-secondary'}
                   onClick={() => {
-                    setAppMode('answer');
-                    setEditMode('number');
+                    const doSwitch = (saveCells: boolean) => {
+                      if (saveCells) {
+                        setSavedSelfSolveCells(JSON.parse(JSON.stringify(puzzle.cells)));
+                      }
+                      if (checkpointCells) {
+                        setPuzzle(p => ({ ...p, cells: checkpointCells }));
+                        setCheckpointCells(null);
+                      }
+                      setIsCheckMode(false);
+                      setCurrentSolveNumber(null);
+                      setEditMode('number');
+                      setAppMode('answer');
+                    };
+                    if (isCheckMode && checkpointCells) {
+                      const hasChanges = puzzle.cells.some((row, y) => row.some((cell, x) => cell.char !== checkpointCells[y][x].char));
+                      if (hasChanges) {
+                        setSelfSolveConfirm({
+                          message: '解答面に移行します。入力した文字を記憶しますか？',
+                          onYes: () => { doSwitch(true); setSelfSolveConfirm(null); },
+                          onNo: () => { setSavedSelfSolveCells(null); doSwitch(false); setSelfSolveConfirm(null); }
+                        });
+                        return;
+                      }
+                    }
+                    doSwitch(false);
                   }}
                   style={{ flex: 1, padding: '12px 0', fontSize: '0.9rem' }}
                 >
@@ -1464,15 +1867,103 @@ function App() {
                 </button>
 
                 {appMode === 'answer' ? (
-                  <>
-                    <button className="btn-secondary" style={{ flex: 1, fontSize: '0.8rem', padding: '6px 2px', lineHeight: '1.2' }} onClick={() => setAlertMessage('将来的に実装予定です')}>自動<br />解答</button>
-                    <button className="btn-secondary" style={{ flex: 1, fontSize: '0.8rem', padding: '6px 2px', lineHeight: '1.2' }} onClick={validateManuscript}>完成<br />チェック</button>
-                  </>
-                ) : (
-                  <div style={{ flex: 1, height: '42px', display: 'flex', alignItems: 'center', color: 'var(--text-muted)', fontSize: '0.85rem', paddingLeft: '8px' }}>
-                    {appMode === 'shade' ? '網掛けマスを選択してください' : ''}
+                  <button 
+                    className="btn-orange" 
+                    style={{ flex: 1, padding: '10px 0', fontSize: '0.9rem', height: '42px' }} 
+                    onClick={validateManuscript}
+                  >
+                    完成チェック
+                  </button>
+                ) : appMode === 'edit' ? (
+                  <div style={{ flex: 1, display: 'flex', gap: '8px', minHeight: '42px' }}>
+                    {isCheckMode ? (
+                      <>
+                        <button 
+                          className="btn-secondary" 
+                          style={{ flex: '0 0 30%', padding: '4px 0', fontSize: '0.8rem', height: '42px' }}
+                          onClick={() => {
+                            const doSwitch = (saveCells: boolean) => {
+                              if (saveCells) {
+                                setSavedSelfSolveCells(JSON.parse(JSON.stringify(puzzle.cells)));
+                              }
+                              if (checkpointCells) {
+                                setPuzzle(p => ({ ...p, cells: checkpointCells }));
+                                setCheckpointCells(null);
+                              }
+                              setIsCheckMode(false);
+                              setCurrentSolveNumber(null);
+                            };
+                            if (checkpointCells) {
+                              const hasChanges = puzzle.cells.some((row, y) => row.some((cell, x) => cell.char !== checkpointCells[y][x].char));
+                              if (hasChanges) {
+                                setSelfSolveConfirm({
+                                  message: '問題面の編集モードへ移行します。入力した文字を記憶しますか？',
+                                  onYes: () => { doSwitch(true); setSelfSolveConfirm(null); },
+                                  onNo: () => { setSavedSelfSolveCells(null); doSwitch(false); setSelfSolveConfirm(null); }
+                                });
+                                return;
+                              }
+                            }
+                            doSwitch(false);
+                          }}
+                        >
+                          編集へ
+                        </button>
+                        <div style={{ flex: '1', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <button
+                            className={solveMethod === 'self' ? 'btn-orange' : 'btn-secondary'}
+                            style={{ 
+                              flex: 1, 
+                              padding: '2px 0', 
+                              fontSize: '0.75rem', 
+                              height: '20px', 
+                              display: 'flex', 
+                              alignItems: 'center', 
+                              justifyContent: 'center',
+                              borderRadius: '4px'
+                            }}
+                            onClick={() => setSolveMethod('self')}
+                          >
+                            セルフ
+                          </button>
+                          <button
+                            className={solveMethod === 'auto' ? 'btn-orange' : 'btn-secondary'}
+                            style={{ 
+                              flex: 1, 
+                              padding: '2px 0', 
+                              fontSize: '0.75rem', 
+                              height: '20px', 
+                              display: 'flex', 
+                              alignItems: 'center', 
+                              justifyContent: 'center',
+                              borderRadius: '4px'
+                            }}
+                            onClick={() => setSolveMethod('auto')}
+                          >
+                            自動解答
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <button 
+                        className="btn-orange" 
+                        style={{ flex: 1, padding: '10px 0', fontSize: '0.9rem', height: '42px' }} 
+                        onClick={() => {
+                          setCheckpointCells(JSON.parse(JSON.stringify(puzzle.cells)));
+                          setIsCheckMode(true);
+                          setSolveMethod('self');
+                          setCurrentSolveNumber(null);
+                          // 記憶済みの盤面があれば復元する
+                          if (savedSelfSolveCells) {
+                            setPuzzle(p => ({ ...p, cells: JSON.parse(JSON.stringify(savedSelfSolveCells)) }));
+                          }
+                        }}
+                      >
+                        解きチェック
+                      </button>
+                    )}
                   </div>
-                )}
+                ) : null}
               </div>
 
               <div style={{ padding: '0' }}>
@@ -1510,6 +2001,7 @@ function App() {
                   })().map((num, idx) => (
                     <div
                       key={num}
+                      id={`word-item-${num}`}
                       draggable={puzzle.wordListOrderMode === 'alphabetical'}
                       onDragStart={(e) => {
                         if (puzzle.wordListOrderMode !== 'alphabetical') return;
@@ -1534,9 +2026,10 @@ function App() {
                         cursor: 'grab',
                         padding: '4px',
                         borderRadius: '4px',
-                        backgroundColor: draggedItemIndex === idx ? 'var(--bg-secondary)' : 'transparent',
-                        border: '1px solid transparent',
-                        transition: 'background-color 0.2s'
+                        backgroundColor: currentSolveNumber === num ? '#fff7ed' : (draggedItemIndex === idx ? 'var(--bg-secondary)' : (completedWords.has(num) ? '#e2e8f0' : 'transparent')),
+                        border: currentSolveNumber === num ? '2px solid #ea580c' : '1px solid transparent',
+                        transition: 'all 0.2s',
+                        boxShadow: currentSolveNumber === num ? '0 2px 4px rgba(234, 88, 12, 0.2)' : 'none'
                       }}
                       onDragEnd={() => setDraggedItemIndex(null)}
                     >
@@ -1589,6 +2082,10 @@ function App() {
                         type="text"
                         value={puzzle.wordList[num] || ''}
                         onChange={(e) => {
+                          if (isCheckMode) {
+                            setAlertMessage('「編集へ」ボタンを押して、編集モードに戻ってください');
+                            return;
+                          }
                           const isFirst = editingWordRef.current !== num;
                           updateWordList(num, e.target.value, isFirst);
                           editingWordRef.current = num;
@@ -1828,9 +2325,9 @@ function App() {
                 <AnswerArea
                   groups={alphabetGroups}
                   cellSize={baseCellSize}
-                  charMap={appMode === 'answer' ? answerChars : {}}
+                  charMap={(appMode === 'answer' || isCheckMode) ? answerChars : {}}
                   isRemainingAnswer={puzzle.isRemainingAnswer}
-                  remainingAnswerWord={appMode === 'answer' ? (puzzle.remainingAnswerWord || '') : ''}
+                  remainingAnswerWord={(appMode === 'answer' || isCheckMode) ? (puzzle.remainingAnswerWord || '') : ''}
                   list2={puzzle.wordList2 || []}
                   onSelectRemaining={setRemainingAnswerWord}
                   isEditingSpaces={isEditingSpaces}
@@ -1842,11 +2339,13 @@ function App() {
                   <Grid
                     cells={puzzle.cells}
                     onCellClick={handleCellClick}
+                    onCellMouseDown={handleCellMouseDown}
                     onCellRightClick={handleCellRightClick}
                     onDragSelection={handleDragSelection}
                     onDragPath={handleDragPath}
                     cellSize={baseCellSize}
                     appMode={appMode}
+                    isCheckMode={isCheckMode}
                     focusedCell={focusedCell}
                     composingText={composingText}
                     shadingColor={puzzle.shadingColor}
@@ -1856,6 +2355,9 @@ function App() {
                     isNumbersHidden={puzzle.isNumbersHidden}
                     isIrregularNumbersDisplay={puzzle.isIrregularNumbersDisplay}
                     sharedCells={irregularInfo.sharedCells}
+                    highlightedDrawnCells={highlightedDrawnCells}
+                    completedWords={completedWords}
+                    currentSolveNumber={currentSolveNumber}
                   />
                 </div>
               </div>
@@ -2080,6 +2582,28 @@ function App() {
           onCancel={(confirmAction as any).onCancel || (() => setConfirmAction(null))}
           isDestructive={(confirmAction as any).isDestructive}
         />
+      )}
+
+      {selfSolveConfirm && (
+        <div className="modal-overlay" style={{ zIndex: 4000 }}>
+          <div className="modal-content glass card" style={{ width: '400px', textAlign: 'center', padding: '32px' }}>
+            <h3 style={{ color: 'var(--text-color)', marginBottom: '16px' }}>確認</h3>
+            <div style={{ marginBottom: '24px', lineHeight: '1.6', fontSize: '0.95rem', whiteSpace: 'pre-wrap' }}>
+              {selfSolveConfirm.message}
+            </div>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+              <button className="btn-primary" onClick={selfSolveConfirm.onYes} style={{ minWidth: '80px' }}>
+                はい
+              </button>
+              <button className="btn-secondary" onClick={selfSolveConfirm.onNo} style={{ minWidth: '80px' }}>
+                いいえ
+              </button>
+              <button className="btn-secondary" onClick={() => setSelfSolveConfirm(null)} style={{ minWidth: '80px' }}>
+                キャンセル
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {showSizeDialog && (

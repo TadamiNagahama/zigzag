@@ -462,6 +462,12 @@ button:disabled {
   z-index: 5;
 }
 
+.grid-cell.yellow-highlight {
+  background-color: #fef08a !important;
+  outline: 2px solid #facc15 !important;
+  z-index: 6;
+}
+
 .grid-cell.wall {
   background-color: var(--wall-color) !important;
 }
@@ -746,4 +752,20 @@ button:disabled {
 @keyframes pop-in {
   0% { opacity: 0; transform: translateX(-50%) scale(0.9); }
   100% { opacity: 1; transform: translateX(-50%) scale(1); }
+}
+
+.btn-orange {
+  background-color: #fff7ed;
+  border: 1px solid #fdba74;
+  color: #ea580c;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-orange:hover {
+  background-color: #ffedd5;
+  border-color: #fb923c;
+  color: #c2410c;
 }

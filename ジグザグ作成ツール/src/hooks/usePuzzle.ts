@@ -645,6 +645,7 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
   return {
     puzzle,
     setPuzzle,
+    pushPuzzle: push,
     resizeBoard,
     toggleCellType,
     toggleNumberFlag,

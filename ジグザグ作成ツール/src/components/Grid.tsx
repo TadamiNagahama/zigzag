@@ -5,6 +5,7 @@ import { type Cell } from '../models/types';
 interface GridProps {
   cells: Cell[][];
   onCellClick: (x: number, y: number) => void;
+  onCellMouseDown: (x: number, y: number) => void;
   onCellRightClick: (x: number, y: number, event: React.MouseEvent) => void;
   onDragSelection: (x1: number, y1: number, x2: number, y2: number) => void;
   onDragPath?: (path: { x: number, y: number }[]) => void;
@@ -20,9 +21,13 @@ interface GridProps {
   isNumbersHidden?: boolean;
   isIrregularNumbersDisplay?: boolean;
   sharedCells?: Record<string, number[]>;
+  isCheckMode?: boolean;
+  highlightedDrawnCells?: { x: number, y: number }[];
+  completedWords?: Set<number>;
+  currentSolveNumber?: number | null;
 }
 
-export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick, onDragSelection, onDragPath, cellSize = 40, appMode = 'edit', focusedCell = null, composingText = '', shadingColor = '#e2e8f0', wordList = {}, boardFontWeight = 'normal', boardFontFamily = '', isNumbersHidden = false, isIrregularNumbersDisplay = false, sharedCells = {} }) => {
+export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown, onCellRightClick, onDragSelection, onDragPath, cellSize = 40, appMode = 'edit', focusedCell = null, composingText = '', shadingColor = '#e2e8f0', wordList = {}, boardFontWeight = 'normal', boardFontFamily = '', isNumbersHidden = false, isIrregularNumbersDisplay = false, sharedCells = {}, isCheckMode = false, highlightedDrawnCells = [], completedWords = new Set(), currentSolveNumber = null }) => {
   const [dragStart, setDragStart] = useState<{ x: number, y: number } | null>(null);
   const [dragPath, setDragPath] = useState<{ x: number, y: number }[]>([]);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
@@ -30,6 +35,7 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick
 
   const handleMouseDown = (x: number, y: number, event: React.MouseEvent) => {
     if (event.button === 0) { // 左クリックのみ
+      onCellMouseDown(x, y);
       setDragStart({ x, y });
       setDragPath([{ x, y }]);
       setDragStartMousePos({ x: event.clientX, y: event.clientY });
@@ -58,10 +64,9 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick
       if (dragPath.length === 1) {
         onCellClick(dragStart.x, dragStart.y);
       } else {
-        if (onDragPath) {
+        if (onDragPath && (appMode === 'answer' || isCheckMode)) {
           onDragPath(dragPath);
-        } else {
-          // 下位互換性のため
+        } else if (onDragSelection && !isCheckMode) {
           const last = dragPath[dragPath.length - 1];
           onDragSelection(dragStart.x, dragStart.y, last.x, last.y);
         }
@@ -109,16 +114,18 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick
 
           // ドラッグ選択中のハイライト判定
           const lastPoint = dragPath[dragPath.length - 1];
-          const isInDrag = (appMode === 'edit' && dragStart && lastPoint)
+          const isInDrag = (appMode === 'edit' && !isCheckMode && dragStart && lastPoint)
             ? (x >= Math.min(dragStart.x, lastPoint.x) && x <= Math.max(dragStart.x, lastPoint.x) &&
                y >= Math.min(dragStart.y, lastPoint.y) && y <= Math.max(dragStart.y, lastPoint.y))
             : dragPath.some(p => p.x === x && p.y === y);
           const isFocused = focusedCell && focusedCell.x === x && focusedCell.y === y;
+          const isHighlightedDrawn = isCheckMode && dragStart && highlightedDrawnCells.some(p => p.x === x && p.y === y);
+          const isYellowHighlight = isCheckMode && dragStart && (isInDrag || isHighlightedDrawn);
 
           return (
             <div
               key={`${x}-${y}`}
-              className={`grid-cell ${cell.type} ${isInDrag ? 'drag-selected' : ''}`}
+              className={`grid-cell ${cell.type} ${isYellowHighlight ? 'yellow-highlight' : (isInDrag ? 'drag-selected' : '')}`}
               onMouseDown={(e) => handleMouseDown(x, y, e)}
               onMouseEnter={() => handleMouseEnter(x, y)}
               onMouseUp={handleMouseUp}
@@ -135,10 +142,10 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick
                 backgroundColor: cell.type === 'wall' 
                   ? 'var(--wall-color)' 
                   : ((cell.answerKey && (appMode === 'shade' || appMode === 'answer' || appMode === 'edit'))
-                      ? '#dcfce7' // 解答マス（アルファベット）は作成モードでも色を付ける
+                      ? '#dcfce7' 
                       : ((cell.isShaded && (appMode === 'shade' || appMode === 'answer'))
                           ? shadingColor 
-                          : 'white')),
+                          : (cell.number !== null && completedWords.has(cell.number) ? '#e2e8f0' : 'white'))),
                 backgroundImage: (cell.isShaded && (appMode === 'shade' || appMode === 'answer')) 
                   ? 'repeating-linear-gradient(45deg, transparent, transparent 2px, rgba(0,0,0,0.1) 2px, rgba(0,0,0,0.1) 4px)' 
                   : 'none',
@@ -258,9 +265,14 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick
       )}
 
       {/* トレース・ヘルプパネル (ドラッグ中のみ表示) */}
-      {dragStart && appMode === 'answer' && (() => {
+      {dragStart && (appMode === 'answer' || isCheckMode) && (() => {
         const startCell = cells[dragStart.y][dragStart.x];
-        const word = startCell.number ? wordList[startCell.number] : null;
+        // セルフモードの場合: currentSolveNumber優先でその単語を表示（途中マスから開始した場合も対応）
+        // それ以外はドラッグ開始マスの数字を使う
+        const popupNum = isCheckMode
+          ? (currentSolveNumber ?? startCell.number)
+          : startCell.number;
+        const word = popupNum ? wordList[popupNum] : null;
         if (!word) return null;
 
         // 起点の初期位置を基準にする（ずっとカーソルを追従させない）
@@ -321,7 +333,7 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellRightClick
             border: '1px solid rgba(255,255,255,0.3)',
             whiteSpace: 'nowrap' // 縦書きになるのを防ぐ
           }}>
-            <div style={{ fontSize: '0.7rem', opacity: 0.9, marginBottom: '2px' }}>{startCell.number}番の単語</div>
+            <div style={{ fontSize: '0.7rem', opacity: 0.9, marginBottom: '2px' }}>{popupNum}番の単語</div>
             <div style={{ 
               fontSize: '1.2rem', 
               fontWeight: 'bold', 
