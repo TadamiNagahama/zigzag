@@ -32,24 +32,33 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown,
   const [dragPath, setDragPath] = useState<{ x: number, y: number }[]>([]);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [dragStartMousePos, setDragStartMousePos] = useState({ x: 0, y: 0 });
+  const [rightDragActive, setRightDragActive] = useState(false);
 
   const handleMouseDown = (x: number, y: number, event: React.MouseEvent) => {
-    if (event.button === 0) { // 左クリックのみ
+    if (event.button === 0) { // 左クリック
       onCellMouseDown(x, y);
       setDragStart({ x, y });
       setDragPath([{ x, y }]);
       setDragStartMousePos({ x: event.clientX, y: event.clientY });
       setMousePos({ x: event.clientX, y: event.clientY });
+    } else if (event.button === 2 && isCheckMode) { // 右クリック（セルフモードのみ）
+      event.preventDefault();
+      setRightDragActive(true);
+      onCellRightClick(x, y, event); // 最初のセルを即消去
     }
   };
 
-  const handleMouseEnter = (x: number, y: number) => {
+  const handleMouseEnter = (x: number, y: number, event: React.MouseEvent) => {
+    // 左ドラッグ中のパス追跡
     if (dragStart) {
       setDragPath(prev => {
-        // 重複を避ける
         if (prev.length > 0 && prev[prev.length - 1].x === x && prev[prev.length - 1].y === y) return prev;
         return [...prev, { x, y }];
       });
+    }
+    // 右ドラッグ中の連続消し（セルフモードのみ）
+    if (rightDragActive && isCheckMode) {
+      onCellRightClick(x, y, event);
     }
   };
 
@@ -74,12 +83,14 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown,
     }
     setDragStart(null);
     setDragPath([]);
+    setRightDragActive(false);
   };
 
   useEffect(() => {
     const handleGlobalMouseUp = () => {
       setDragStart(null);
       setDragPath([]);
+      setRightDragActive(false);
     };
     window.addEventListener('mouseup', handleGlobalMouseUp);
     return () => window.removeEventListener('mouseup', handleGlobalMouseUp);
@@ -127,11 +138,11 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown,
               key={`${x}-${y}`}
               className={`grid-cell ${cell.type} ${isYellowHighlight ? 'yellow-highlight' : (isInDrag ? 'drag-selected' : '')}`}
               onMouseDown={(e) => handleMouseDown(x, y, e)}
-              onMouseEnter={() => handleMouseEnter(x, y)}
+              onMouseEnter={(e) => handleMouseEnter(x, y, e)}
               onMouseUp={handleMouseUp}
               onContextMenu={(e) => {
                 e.preventDefault();
-                onCellRightClick(x, y, e);
+                if (!rightDragActive) onCellRightClick(x, y, e); // ドラッグ中は通常コンテキストメニューを抑止
               }}
               style={{
                 gridColumn: `span ${spanW}`,

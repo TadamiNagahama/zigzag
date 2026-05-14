@@ -250,81 +250,6 @@ function App() {
     return localStorage.getItem('zigzag_last_export_filename');
   });
 
-  // 盤面の各マスがどの単語番号（リスト番号）に含まれるかを計算
-  const { wordCoverageMap, wordCharIndexMap } = useMemo(() => {
-    const map: Record<string, number[]> = {};
-    const charIdxMap: Record<string, Record<number, number>> = {}; // key: "x,y" -> { wordNum: charIndex }
-    
-    // 使用されている番号を抽出
-    const usedNumbers = new Set<number>();
-    puzzle.cells.forEach(row => row.forEach(cell => {
-      if (cell.number !== null) usedNumbers.add(cell.number);
-    }));
-
-    // 白紙の盤面から、数字と単語リスト、隣接関係のみを元に正解パスを導き出す
-    const findZigzagPath = (num: number, word: string, px: number, py: number, visited: Set<string>, currentPath: { x: number, y: number }[]): { x: number, y: number }[] | null => {
-      if (px < 0 || px >= puzzle.width || py < 0 || py >= puzzle.height) return null;
-      const cell = puzzle.cells[py][px];
-      
-      // 壁は通れない
-      if (cell.type !== 'normal') return null;
-
-      // すでに通ったマスは通れない
-      const key = `${px},${py}`;
-      if (visited.has(key)) return null;
-
-      // 1文字目（数字マス）以外で、別の数字マスにぶつかるのはジグザグのルール上NG
-      if (currentPath.length > 0 && cell.number !== null) return null;
-
-      const newPath = [...currentPath, { x: px, y: py }];
-      
-      // 文字数が一致すれば成功
-      if (word.length === newPath.length) return newPath;
-
-      const newVisited = new Set(visited);
-      newVisited.add(key);
-
-      // 上下左右を探索
-      for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
-        const res = findZigzagPath(num, word, px + dx, py + dy, newVisited, newPath);
-        if (res) return res;
-      }
-      return null;
-    };
-
-    Array.from(usedNumbers).forEach(num => {
-      const word = puzzle.wordList[num];
-      if (!word || word.trim() === '') return;
-
-      let startPos: { x: number, y: number } | null = null;
-      for (let y = 0; y < puzzle.height; y++) {
-        for (let x = 0; x < puzzle.width; x++) {
-          if (puzzle.cells[y][x].number === num) {
-            startPos = { x, y };
-            break;
-          }
-        }
-        if (startPos) break;
-      }
-
-      if (startPos) {
-        const path = findZigzagPath(num, word, startPos.x, startPos.y, new Set(), []);
-        if (path) {
-          path.forEach((p, idx) => {
-            const k = `${p.x},${p.y}`;
-            if (!map[k]) map[k] = [];
-            map[k].push(num);
-            // このセルが単語numの何文字目かを記録
-            if (!charIdxMap[k]) charIdxMap[k] = {};
-            charIdxMap[k][num] = idx;
-          });
-        }
-      }
-    });
-
-    return { wordCoverageMap: map, wordCharIndexMap: charIdxMap };
-  }, [puzzle.cells, puzzle.wordList, puzzle.width, puzzle.height]);
-
   // ユーザーが実際に入力した（あるいは初期配置されている）文字を辿って、
   // 特定のマスがどの単語の何文字目に該当するかを判定する関数
   const getDrawnWordCandidates = useCallback((targetX: number, targetY: number) => {
@@ -357,14 +282,14 @@ function App() {
         if (x < 0 || x >= puzzle.width || y < 0 || y >= puzzle.height) return;
         const cell = puzzle.cells[y][x];
         if (cell.type !== 'normal') return;
-        
+
         const playerChar = (appMode === 'answer' && !isCheckMode) ? (cell.answerChar || cell.char) : cell.char;
         const cellChar = playerChar || (cell.number === num ? word[0] : (cell.number ? puzzle.wordList[cell.number]?.[0] : ''));
         if (cellChar !== word[charIndex]) return;
 
         const key = `${x},${y}`;
         if (visited.has(key)) return;
-        
+
         if (x === targetX && y === targetY) {
           if (charIndex > maxFoundIndex) maxFoundIndex = charIndex;
         }
@@ -403,12 +328,12 @@ function App() {
     }
     if (startX === -1) return [];
 
-    let bestPath: {x: number, y: number}[] = [];
-    const dfs = (x: number, y: number, charIndex: number, currentPath: {x: number, y: number}[], visited: Set<string>) => {
+    let bestPath: { x: number, y: number }[] = [];
+    const dfs = (x: number, y: number, charIndex: number, currentPath: { x: number, y: number }[], visited: Set<string>) => {
       if (x < 0 || x >= puzzle.width || y < 0 || y >= puzzle.height) return;
       const cell = puzzle.cells[y][x];
       if (cell.type !== 'normal') return;
-      
+
       const playerChar = (appMode === 'answer' && !isCheckMode) ? (cell.answerChar || cell.char) : cell.char;
       const cellChar = playerChar || (cell.number === num ? word[0] : (cell.number ? puzzle.wordList[cell.number]?.[0] : ''));
       if (cellChar !== word[charIndex]) return;
@@ -416,7 +341,7 @@ function App() {
       const key = `${x},${y}`;
       if (visited.has(key)) return;
 
-      const newPath = [...currentPath, {x, y}];
+      const newPath = [...currentPath, { x, y }];
       if (newPath.length > bestPath.length) {
         bestPath = newPath;
       }
@@ -545,14 +470,14 @@ function App() {
     });
     return () => unsubscribe();
   }, []);
-  
+
   const isPuzzleModified = useMemo(() => {
     // 1. 盤面のチェック
-    const hasAnyCellEdit = puzzle.cells.some(row => row.some(cell => 
-      cell.type !== 'normal' || 
-      cell.char !== '' || 
-      cell.answerChar !== '' || 
-      cell.isNumbered || 
+    const hasAnyCellEdit = puzzle.cells.some(row => row.some(cell =>
+      cell.type !== 'normal' ||
+      cell.char !== '' ||
+      cell.answerChar !== '' ||
+      cell.isNumbered ||
       cell.isShaded ||
       cell.mergedParent ||
       cell.answerKey !== null
@@ -733,6 +658,13 @@ function App() {
       fitToScreen();
       setShowLoadDialog(false);
       setConfirmAction(null);
+      // セルフモード関連のステートをリセット（旧パズルの状態が残らないように）
+      setIsCheckMode(false);
+      setCheckpointCells(null);
+      setCurrentSolveNumber(null);
+      setSolveCandidates([]);
+      setSolveCandidateIndex(0);
+      setFocusedCell(null);
       // 保存されていたセルフモード盤面を復元
       const rawSaved = (p as any).savedSelfSolveCells;
       if (rawSaved && Array.isArray(rawSaved) && rawSaved.length > 0) {
@@ -779,6 +711,14 @@ function App() {
       setShowSizeDialog(false);
       fitToScreen();
       setConfirmAction(null);
+      // セルフモード関連のステートをリセット（旧パズルの状態が残らないように）
+      setIsCheckMode(false);
+      setCheckpointCells(null);
+      setCurrentSolveNumber(null);
+      setSolveCandidates([]);
+      setSolveCandidateIndex(0);
+      setFocusedCell(null);
+      setSavedSelfSolveCells(null);
     };
 
     if (isPuzzleModified) {
@@ -888,21 +828,21 @@ function App() {
   const handleDragSelection = (x1: number, y1: number, x2: number, y2: number) => {
     if (appMode === 'answer' || isCheckMode) return;
 
-        if (appMode === 'shade') {
-          const startX = Math.min(x1, x2);
-          const endX = Math.max(x1, x2);
-          const startY = Math.min(y1, y2);
-          const endY = Math.max(y1, y2);
-          const targetValue = !puzzle.cells[startY][startX].isShaded;
-          for (let y = startY; y <= endY; y++) {
-            for (let x = startX; x <= endX; x++) {
-              toggleShaded(x, y, targetValue);
-            }
-          }
-        } else if (appMode === 'edit') {
-          mergeCells(x1, y1, x2, y2);
+    if (appMode === 'shade') {
+      const startX = Math.min(x1, x2);
+      const endX = Math.max(x1, x2);
+      const startY = Math.min(y1, y2);
+      const endY = Math.max(y1, y2);
+      const targetValue = !puzzle.cells[startY][startX].isShaded;
+      for (let y = startY; y <= endY; y++) {
+        for (let x = startX; x <= endX; x++) {
+          toggleShaded(x, y, targetValue);
         }
       }
+    } else if (appMode === 'edit') {
+      mergeCells(x1, y1, x2, y2);
+    }
+  }
 
   const handleDragPath = (path: { x: number, y: number }[]) => {
     if (path.length < 2) return;
@@ -993,7 +933,7 @@ function App() {
           for (let i = 0; i < path.length; i++) {
             const curr = path[i];
             const cell = puzzle.cells[curr.y][curr.x];
-            
+
             const px = cell.mergedParent ? cell.mergedParent.x : curr.x;
             const py = cell.mergedParent ? cell.mergedParent.y : curr.y;
             const logicalKey = `${px},${py}`;
@@ -1197,7 +1137,7 @@ function App() {
 
         // 次の文字を探すために、結合範囲の全てのマスとその隣接マスをリストアップ
         let total = 0;
-        const groupCells: {x: number, y: number}[] = [];
+        const groupCells: { x: number, y: number }[] = [];
         if (parentCell.mergedSize) {
           for (let dy = 0; dy < parentCell.mergedSize.height; dy++) {
             for (let dx = 0; dx < parentCell.mergedSize.width; dx++) {
@@ -1210,19 +1150,19 @@ function App() {
 
         const checkedNeighborGroups = new Set<string>();
         const neighbors = [[0, 1], [0, -1], [1, 0], [-1, 0]];
-        
+
         for (const gc of groupCells) {
           for (const [dx, dy] of neighbors) {
             const nx = gc.x + dx;
             const ny = gc.y + dy;
             if (nx < 0 || nx >= puzzle.width || ny < 0 || ny >= puzzle.height) continue;
-            
+
             const nCell = puzzle.cells[ny][nx];
             if (nCell.type !== 'normal') continue;
 
             const npx = nCell.mergedParent ? nCell.mergedParent.x : nx;
             const npy = nCell.mergedParent ? nCell.mergedParent.y : ny;
-            
+
             // 隣接マスが自分と同じ結合グループ内ならスキップ
             if (npx === px && npy === py) continue;
 
@@ -1567,7 +1507,7 @@ function App() {
     for (let i = 1; i < uniqueSorted.length; i++) {
       const prevChar = uniqueSorted[i - 1];
       const currChar = uniqueSorted[i];
-      
+
       const isConsecutive = currChar.charCodeAt(0) === prevChar.charCodeAt(0) + 1;
       const hasSpace = (puzzle.answerColumnSpaces || []).includes(prevChar);
 
@@ -1631,12 +1571,12 @@ function App() {
   };
 
   return (
-      <Layout
-        onExport={handleExport}
-        onNew={handleNew}
-        onSave={handleSave}
-        onLoad={handleLoad}
-        onImportExcel={handleImportExcelClick}
+    <Layout
+      onExport={handleExport}
+      onNew={handleNew}
+      onSave={handleSave}
+      onLoad={handleLoad}
+      onImportExcel={handleImportExcelClick}
       onHelp={() => setShowHelpDialog(true)}
       onSettings={() => {
         if (window.innerWidth < 768) {
@@ -1657,7 +1597,12 @@ function App() {
       appMode={appMode}
       onModeChange={setAppMode}
     >
-      <div style={{ display: 'flex', flex: 1, height: 'calc(100vh - 80px)', overflow: 'hidden' }}>
+      <div className="main-content-wrapper" style={{ 
+        display: 'flex', 
+        flex: 1, 
+        height: window.innerWidth < 768 ? '100%' : 'calc(100vh - 80px)', 
+        overflow: 'hidden' 
+      }}>
         <input
           ref={hiddenInputRef}
           type="text"
@@ -1820,11 +1765,11 @@ function App() {
 
               {/* 変則モードのエラー表示 */}
               {puzzle.puzzleType === '変則' && puzzle.isIrregularNumbersDisplay && irregularInfo.errors.length > 0 && (
-                <div style={{ 
-                  marginBottom: '16px', 
-                  padding: '8px', 
-                  backgroundColor: '#fef2f2', 
-                  border: '1px solid #fee2e2', 
+                <div style={{
+                  marginBottom: '16px',
+                  padding: '8px',
+                  backgroundColor: '#fef2f2',
+                  border: '1px solid #fee2e2',
                   borderRadius: '4px',
                   fontSize: '0.75rem',
                   color: '#dc2626'
@@ -1867,9 +1812,9 @@ function App() {
                 </button>
 
                 {appMode === 'answer' ? (
-                  <button 
-                    className="btn-orange" 
-                    style={{ flex: 1, padding: '10px 0', fontSize: '0.9rem', height: '42px' }} 
+                  <button
+                    className="btn-orange"
+                    style={{ flex: 1, padding: '10px 0', fontSize: '0.9rem', height: '42px' }}
                     onClick={validateManuscript}
                   >
                     完成チェック
@@ -1878,8 +1823,8 @@ function App() {
                   <div style={{ flex: 1, display: 'flex', gap: '8px', minHeight: '42px' }}>
                     {isCheckMode ? (
                       <>
-                        <button 
-                          className="btn-secondary" 
+                        <button
+                          className="btn-secondary"
                           style={{ flex: '0 0 30%', padding: '4px 0', fontSize: '0.8rem', height: '42px' }}
                           onClick={() => {
                             const doSwitch = (saveCells: boolean) => {
@@ -1912,13 +1857,13 @@ function App() {
                         <div style={{ flex: '1', display: 'flex', flexDirection: 'column', gap: '2px' }}>
                           <button
                             className={solveMethod === 'self' ? 'btn-orange' : 'btn-secondary'}
-                            style={{ 
-                              flex: 1, 
-                              padding: '2px 0', 
-                              fontSize: '0.75rem', 
-                              height: '20px', 
-                              display: 'flex', 
-                              alignItems: 'center', 
+                            style={{
+                              flex: 1,
+                              padding: '2px 0',
+                              fontSize: '0.75rem',
+                              height: '20px',
+                              display: 'flex',
+                              alignItems: 'center',
                               justifyContent: 'center',
                               borderRadius: '4px'
                             }}
@@ -1928,13 +1873,13 @@ function App() {
                           </button>
                           <button
                             className={solveMethod === 'auto' ? 'btn-orange' : 'btn-secondary'}
-                            style={{ 
-                              flex: 1, 
-                              padding: '2px 0', 
-                              fontSize: '0.75rem', 
-                              height: '20px', 
-                              display: 'flex', 
-                              alignItems: 'center', 
+                            style={{
+                              flex: 1,
+                              padding: '2px 0',
+                              fontSize: '0.75rem',
+                              height: '20px',
+                              display: 'flex',
+                              alignItems: 'center',
                               justifyContent: 'center',
                               borderRadius: '4px'
                             }}
@@ -1945,9 +1890,9 @@ function App() {
                         </div>
                       </>
                     ) : (
-                      <button 
-                        className="btn-orange" 
-                        style={{ flex: 1, padding: '10px 0', fontSize: '0.9rem', height: '42px' }} 
+                      <button
+                        className="btn-orange"
+                        style={{ flex: 1, padding: '10px 0', fontSize: '0.9rem', height: '42px' }}
                         onClick={() => {
                           setCheckpointCells(JSON.parse(JSON.stringify(puzzle.cells)));
                           setIsCheckMode(true);
@@ -1987,7 +1932,14 @@ function App() {
             <hr style={{ border: 'none', borderTop: '2px solid var(--border-color)', margin: '0', flexShrink: 0 }} />
 
             {/* スクロール可能な中央部分 */}
-            <section style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', padding: '12px 16px' }}>
+            <section style={{ 
+              flex: 1, 
+              display: 'flex', 
+              flexDirection: 'column', 
+              overflowY: 'auto', 
+              padding: '12px 16px',
+              paddingBottom: window.innerWidth < 768 ? '60px' : '12px'
+            }}>
               <div style={{ fontSize: '0.8rem' }}>
                 <div className="word-list-grid" style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
                   {(() => {
@@ -2164,8 +2116,8 @@ function App() {
                     </div>
                     <div className="word-list2-container" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       {(puzzle.wordList2 || ['']).map((word, idx) => (
-                        <div 
-                          key={idx} 
+                        <div
+                          key={idx}
                           draggable
                           onDragStart={(e) => {
                             setDraggedWord2Index(idx);
@@ -2183,9 +2135,9 @@ function App() {
                             setDraggedWord2Index(null);
                           }}
                           onDragEnd={() => setDraggedWord2Index(null)}
-                          style={{ 
-                            display: 'flex', 
-                            alignItems: 'center', 
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
                             gap: '6px',
                             cursor: 'grab',
                             padding: '4px',
@@ -2271,9 +2223,9 @@ function App() {
         </aside>
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
-          <section className={`main-board glass ${window.innerWidth < 768 && activeMobileTab === 'list' ? 'hide-on-mobile' : ''}`} style={{
+        <div className={`main-board glass ${window.innerWidth < 768 && activeMobileTab === 'list' ? 'hide-on-mobile' : ''}`} style={{
             flex: 1,
-            padding: '10px 20px 0px 20px',
+            padding: window.innerWidth < 768 ? '0' : '10px 20px 0px 20px',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
@@ -2283,15 +2235,107 @@ function App() {
             position: 'relative',
             borderRadius: '6px'
           }}>
+            {/* モード切り替えボタン（モバイル専用・固定表示） */}
+            {window.innerWidth < 768 && (
+              <div style={{
+                width: '100%',
+                padding: '8px 12px',
+                borderBottom: '1px solid var(--border-color)',
+                backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                backdropFilter: 'blur(8px)',
+                zIndex: 10,
+                flexShrink: 0,
+                display: 'flex',
+                gap: '8px'
+              }}>
+                {appMode === 'answer' ? (
+                  <button
+                    className="btn-orange"
+                    style={{ flex: 1, padding: '8px 0', fontSize: '0.9rem', height: '38px' }}
+                    onClick={validateManuscript}
+                  >
+                    完成チェック
+                  </button>
+                ) : appMode === 'edit' ? (
+                  isCheckMode ? (
+                    <>
+                      <button
+                        className="btn-secondary"
+                        style={{ flex: '0 0 70px', padding: '0', fontSize: '0.8rem', height: '38px' }}
+                        onClick={() => {
+                          const doSwitch = (saveCells: boolean) => {
+                            if (saveCells) {
+                              setSavedSelfSolveCells(JSON.parse(JSON.stringify(puzzle.cells)));
+                            }
+                            if (checkpointCells) {
+                              setPuzzle(p => ({ ...p, cells: checkpointCells }));
+                              setCheckpointCells(null);
+                            }
+                            setIsCheckMode(false);
+                            setCurrentSolveNumber(null);
+                          };
+                          if (checkpointCells) {
+                            const hasChanges = puzzle.cells.some((row, y) => row.some((cell, x) => cell.char !== checkpointCells[y][x].char));
+                            if (hasChanges) {
+                              setSelfSolveConfirm({
+                                message: '編集モードへ移行します。入力内容を記憶しますか？',
+                                onYes: () => { doSwitch(true); setSelfSolveConfirm(null); },
+                                onNo: () => { setSavedSelfSolveCells(null); doSwitch(false); setSelfSolveConfirm(null); }
+                              });
+                              return;
+                            }
+                          }
+                          doSwitch(false);
+                        }}
+                      >
+                        編集へ
+                      </button>
+                      <button
+                        className={solveMethod === 'self' ? 'btn-orange' : 'btn-secondary'}
+                        style={{ flex: 1, fontSize: '0.8rem', height: '38px' }}
+                        onClick={() => setSolveMethod('self')}
+                      >
+                        セルフ
+                      </button>
+                      <button
+                        className={solveMethod === 'auto' ? 'btn-orange' : 'btn-secondary'}
+                        style={{ flex: 1, fontSize: '0.8rem', height: '38px' }}
+                        onClick={() => setSolveMethod('auto')}
+                      >
+                        自動
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="btn-orange"
+                      style={{ flex: 1, padding: '8px 0', fontSize: '0.9rem', height: '38px' }}
+                      onClick={() => {
+                        setCheckpointCells(JSON.parse(JSON.stringify(puzzle.cells)));
+                        setIsCheckMode(true);
+                        setSolveMethod('self');
+                        setCurrentSolveNumber(null);
+                        if (savedSelfSolveCells) {
+                          setPuzzle(p => ({ ...p, cells: JSON.parse(JSON.stringify(savedSelfSolveCells)) }));
+                        }
+                      }}
+                    >
+                      解きチェック
+                    </button>
+                  )
+                ) : null}
+              </div>
+            )}
+
             <div id="board-scroll-area" style={{
               flex: 1,
               width: '100%',
-              height: 0,
-              minHeight: '100%',
+              minHeight: 0,
               overflow: 'auto',
               display: 'flex',
               flexDirection: 'column',
-              alignItems: 'center'
+              alignItems: 'center',
+              padding: '20px',
+              paddingBottom: window.innerWidth < 768 ? '120px' : '20px'
             }}>
               <div id="board-content-wrapper" style={{
                 transform: `scale(${zoom})`,
@@ -2362,24 +2406,58 @@ function App() {
                 </div>
               </div>
             </div>
-          </section>
 
-          {/* タグバーの追加 */}
+            {/* モバイル版ではここは空にする（下のタグバー統合部分へ移動） */}
+          </div>
+
+
+          {/* タグバーと画面フィットボタンの統合コンテナ */}
           <div style={{
             width: '100%',
-            padding: '4px 16px',
-            borderTop: '1px solid var(--border-color)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            backgroundColor: '#f1f5f9',
-            flexShrink: 0,
-            minHeight: '32px',
             position: window.innerWidth < 768 ? 'fixed' : 'relative',
             bottom: window.innerWidth < 768 ? '70px' : 'auto',
             left: 0,
-            zIndex: 900
+            zIndex: 950,
+            display: 'flex',
+            flexDirection: 'column'
           }}>
+            {/* モバイル用画面フィットボタン（タグバーの上に密着） */}
+            {window.innerWidth < 768 && activeMobileTab === 'board' && (
+              <div style={{
+                width: '100%',
+                padding: '4px 12px',
+                borderTop: '1px solid var(--border-color)',
+                backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                backdropFilter: 'blur(8px)',
+                flexShrink: 0
+              }}>
+                <button 
+                  className="btn-secondary" 
+                  onClick={fitToScreen} 
+                  style={{ 
+                    width: '100%',
+                    height: '38px',
+                    fontSize: '0.9rem', 
+                    borderRadius: '8px',
+                    fontWeight: '600'
+                  }}
+                >
+                  画面フィット
+                </button>
+              </div>
+            )}
+            
+            <div style={{
+              width: '100%',
+              padding: '4px 16px',
+              borderTop: '1px solid var(--border-color)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              backgroundColor: '#f1f5f9',
+              flexShrink: 0,
+              minHeight: '32px'
+            }}>
             <button
               onClick={() => setShowTagDialog(true)}
               style={{
@@ -2424,12 +2502,13 @@ function App() {
               )) : (
                 <span style={{ fontSize: '0.65rem', color: '#94a3b8' }}>タグ未設定</span>
               )}
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      {contextMenu && (() => {
+    {contextMenu && (() => {
         const menuWidth = 240;
         const menuHeight = 310; // 概算
         const x = contextMenu.x + menuWidth > window.innerWidth ? contextMenu.x - menuWidth : contextMenu.x;
@@ -2489,7 +2568,7 @@ function App() {
           onSetFontWeight={setBoardFontWeight}
           onSetFontFamily={setBoardFontFamily}
           onSetCloudAutoSave={setCloudAutoSave}
-          version="1.0.0"
+          version="1.1.0"
         />
       )}
 
@@ -2665,6 +2744,16 @@ function App() {
               >
                 キャンセル
               </button>
+            </div>
+            <div style={{ 
+              marginTop: '20px', 
+              fontSize: '0.8rem', 
+              color: 'var(--text-muted)', 
+              textAlign: 'center',
+              borderTop: '1px solid var(--border-color)',
+              paddingTop: '12px'
+            }}>
+              Version 1.1.0
             </div>
           </div>
         </div>

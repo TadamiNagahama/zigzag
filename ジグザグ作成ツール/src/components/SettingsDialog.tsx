@@ -30,17 +30,17 @@ const FONT_FAMILIES = [
   { label: '丸ゴシック', value: '"HG丸ｺﾞｼｯｸM-PRO", "Rounded Mplus 1c", sans-serif' },
 ];
 
-export const SettingsDialog: React.FC<SettingsDialogProps> = ({ 
+export const SettingsDialog: React.FC<SettingsDialogProps> = ({
   shadingColor,
   boardFontWeight,
   boardFontFamily,
   cloudAutoSave,
-  onClose, 
+  onClose,
   onSetShadingColor,
   onSetFontWeight,
   onSetFontFamily,
   onSetCloudAutoSave,
-  version = '1.0.0'
+  version = '1.1.0'
 }) => {
   return (
     <div className="modal-overlay" style={{ zIndex: 3000 }}>
@@ -59,8 +59,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
               <Type size={18} color="var(--primary-color)" />
               <div style={{ fontWeight: 'bold', fontSize: '0.95rem' }}>フォントの種類</div>
             </div>
-            <select 
-              value={boardFontFamily} 
+            <select
+              value={boardFontFamily}
               onChange={(e) => onSetFontFamily(e.target.value)}
               className="input-field"
               style={{ width: '100%', padding: '10px' }}
@@ -81,8 +81,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
               <button
                 className={`btn-secondary ${boardFontWeight === 'normal' ? 'active' : ''}`}
                 onClick={() => onSetFontWeight('normal')}
-                style={{ 
-                  flex: 1, 
+                style={{
+                  flex: 1,
                   padding: '10px',
                   backgroundColor: boardFontWeight === 'normal' ? 'var(--primary-color)' : '',
                   color: boardFontWeight === 'normal' ? 'white' : '',
@@ -94,8 +94,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
               <button
                 className={`btn-secondary ${boardFontWeight === 'bold' ? 'active' : ''}`}
                 onClick={() => onSetFontWeight('bold')}
-                style={{ 
-                  flex: 1, 
+                style={{
+                  flex: 1,
                   padding: '10px',
                   fontWeight: 'bold',
                   backgroundColor: boardFontWeight === 'bold' ? 'var(--primary-color)' : '',
@@ -143,8 +143,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({
                 </div>
               </div>
               <label style={{ position: 'relative', display: 'inline-block', width: '48px', height: '26px' }}>
-                <input 
-                  type="checkbox" 
+                <input
+                  type="checkbox"
                   checked={cloudAutoSave}
                   onChange={(e) => onSetCloudAutoSave(e.target.checked)}
                   style={{ opacity: 0, width: 0, height: 0 }}
