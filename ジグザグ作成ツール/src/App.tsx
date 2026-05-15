@@ -494,11 +494,11 @@ function App() {
   }, [puzzle.cells, puzzle.wordList, puzzle.width, puzzle.height, appMode, isCheckMode]);
 
   const highlightedDrawnCells = useMemo(() => {
-    if (isCheckMode && currentSolveNumber !== null) {
+    if ((isCheckMode || appMode === 'answer') && currentSolveNumber !== null) {
       return getDrawnCellsForWord(currentSolveNumber);
     }
     return [];
-  }, [isCheckMode, currentSolveNumber, getDrawnCellsForWord]);
+  }, [isCheckMode, appMode, currentSolveNumber, getDrawnCellsForWord]);
 
   const completedWords = useMemo(() => {
     const completed = new Set<number>();
@@ -867,12 +867,10 @@ function App() {
   }
 
   const handleCellMouseDown = (x: number, y: number) => {
-    if (isCheckMode) {
+    if (isCheckMode || appMode === 'answer') {
       const drawnCandidates = getDrawnWordCandidates(x, y);
       if (drawnCandidates.length > 0) {
         let nextIndex = 0;
-        // 同じマスを（マウスダウンで）押した場合は候補を切り替え
-        // 判定には focusedCell ではなく現在選択中の座標を直接使う
         if (focusedCell?.x === x && focusedCell?.y === y && solveCandidates.length > 0) {
           nextIndex = (solveCandidateIndex + 1) % drawnCandidates.length;
         }
@@ -882,33 +880,24 @@ function App() {
         setSolveCandidateIndex(nextIndex);
         setFocusedCell({ x, y });
 
-        // リストへスクロール
         setTimeout(() => {
           const el = document.getElementById(`word-item-${selectedMatch.num}`);
           if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }, 10);
       } else {
-        // 未接続の文字や空白マスをクリックした場合は選択を解除
         setFocusedCell(null);
         setCurrentSolveNumber(null);
       }
-      return; // セルフモード時はここで終了
+      return; 
     }
   };
 
   const handleCellClick = (x: number, y: number) => {
-    if (isCheckMode) return; // セルフモード時はクリックでの編集を禁止
+    if (isCheckMode) return;
 
     if (appMode === 'answer') {
       const cell = puzzle.cells[y][x];
 
-      // 入力済み文字がある場合は消去（数字・ヒント文字付きは除く）
-      if (cell.answerChar && !cell.char && !cell.isNumbered) {
-        updateCellAnswerChar(x, y, '');
-        return;
-      }
-
-      // 提示文字があるマスはフォーカスしない
       if (cell.char) return;
       setFocusedCell({ x, y });
       return;
@@ -923,19 +912,15 @@ function App() {
         if (puzzle.puzzleType === 'ナンバーレス') {
           const cell = puzzle.cells[y][x];
           if (!cell.isNumbered && !cell.char) {
-            // なし -> 数字
             toggleNumberFlag(x, y);
           } else if (cell.isNumbered) {
-            // 数字 -> 文字入力
             toggleNumberFlag(x, y);
             setFocusedCell({ x, y });
           } else {
-            // 文字入力 -> なし (数字を振る)
             toggleNumberFlag(x, y);
             setFocusedCell(null);
           }
         } else if (puzzle.puzzleType === 'ウルトラ') {
-          // ウルトラ: 数字をトグルしつつ、常に文字入力可能にする
           toggleNumberFlag(x, y);
           setFocusedCell({ x, y });
         } else {
@@ -944,20 +929,29 @@ function App() {
       }
     }
     setContextMenu(null);
-  }
+  };
 
   const handleCellRightClick = (x: number, y: number, event: React.MouseEvent) => {
+    if (event) event.preventDefault();
+
+    if (appMode === 'answer') {
+      // 解答面: ユーザー入力レイヤー(answerChar)のみを消去
+      // ヒント文字(char)は別の変数にあるため、ここを空にしてもヒントは消えません
+      updateCellAnswerChar(x, y, '');
+      return;
+    }
+
     if (isCheckMode) {
-      event.preventDefault();
       const cell = puzzle.cells[y][x];
-      // 文字があり、かつ数字マスでない場合のみ消去可能
-      if (cell.char && cell.number === null) {
+      // セルフモード: 数字マス以外なら盤面文字(char)を消去可能
+      if (cell.number === null) {
         updateCellChar(x, y, '');
       }
       return;
     }
+
     setContextMenu({ x: event.clientX, y: event.clientY, cellX: x, cellY: y });
-  }
+  };
 
   const handleDragSelection = (x1: number, y1: number, x2: number, y2: number) => {
     if (appMode === 'answer' || isCheckMode) return;
@@ -996,20 +990,15 @@ function App() {
     }
 
     if (appMode === 'answer' || (appMode === 'edit' && isCheckMode)) {
-      const startCell = puzzle.cells[path[0].y][path[0].x];
-
-      // セルフモード: 解答面と同じ方式でドラッグ軌跡に沿って文字を書き込む
-      if (isCheckMode && currentSolveNumber !== null) {
+      // 単語入力のトレース (左ボタンは入力のみを担当)
+      if (currentSolveNumber !== null) {
         const word = puzzle.wordList[currentSolveNumber];
         if (!word) return;
 
-        // ドラッグ開始セルの文字インデックスを特定
         const drawnCandidates = getDrawnWordCandidates(path[0].x, path[0].y);
         const match = drawnCandidates.find(c => c.num === currentSolveNumber);
         const startCharIdx = match ? match.index : 0;
 
-        // 解答面のドラッグ入力と同じロジック
-        // ユーザーのドラッグ軌跡(path)に沿って、単語の文字を順に埋める
         pushPuzzle(prev => {
           const newCells = prev.cells.map(row => row.map(c => ({ ...c })));
           let currentCharIndex = startCharIdx;
@@ -1018,7 +1007,6 @@ function App() {
           for (let i = 0; i < path.length; i++) {
             const curr = path[i];
             const cell = prev.cells[curr.y][curr.x];
-
             const px = cell.mergedParent ? cell.mergedParent.x : curr.x;
             const py = cell.mergedParent ? cell.mergedParent.y : curr.y;
             const logicalKey = `${px},${py}`;
@@ -1029,65 +1017,21 @@ function App() {
             lastLogicalKey = logicalKey;
 
             if (currentCharIndex < word.length) {
-              // 数字マスの1文字目は既に表示されているのでスキップ
-              if (i > 0 && newCells[py][px].number !== null && !newCells[py][px].mergedParent) {
+              const targetCell = newCells[py][px];
+              if (i > 0 && targetCell.number !== null && !targetCell.mergedParent) {
                 continue;
               }
-              newCells[py][px].char = word[currentCharIndex];
+              if (isCheckMode) {
+                targetCell.char = word[currentCharIndex];
+              } else {
+                targetCell.answerChar = word[currentCharIndex];
+              }
             } else {
               break;
             }
           }
           return { ...prev, cells: newCells, updatedAt: Date.now() };
         });
-        return;
-      }
-
-      // 解答面モード（既存ロジック）
-      if (appMode === 'answer') {
-        // 消去のトレース
-        if (startCell.answerChar && !startCell.char && !startCell.isNumbered) {
-          path.forEach(p => {
-            const cell = puzzle.cells[p.y][p.x];
-            if (!cell.isNumbered && !cell.char) {
-              updateCellAnswerChar(p.x, p.y, '');
-            }
-          });
-          return;
-        }
-
-        // 自動解答のトレース
-        if (startCell.isNumbered && startCell.number !== null) {
-          const word = puzzle.wordList[startCell.number];
-          if (!word) return;
-
-          let currentCharIndex = 0;
-          let lastLogicalKey = "";
-
-          for (let i = 0; i < path.length; i++) {
-            const curr = path[i];
-            const cell = puzzle.cells[curr.y][curr.x];
-
-            const px = cell.mergedParent ? cell.mergedParent.x : curr.x;
-            const py = cell.mergedParent ? cell.mergedParent.y : curr.y;
-            const logicalKey = `${px},${py}`;
-
-            if (i > 0 && logicalKey !== lastLogicalKey) {
-              currentCharIndex++;
-            }
-            lastLogicalKey = logicalKey;
-
-            if (currentCharIndex < word.length) {
-              const parentCell = puzzle.cells[py][px];
-              if (i > 0 && parentCell.number !== null && !parentCell.mergedParent) {
-                continue;
-              }
-              updateCellAnswerChar(px, py, word[currentCharIndex]);
-            } else {
-              break;
-            }
-          }
-        }
       }
     }
   };
@@ -2139,13 +2083,20 @@ function App() {
                         display: 'flex',
                         alignItems: 'center',
                         gap: '6px',
-                        cursor: 'grab',
+                        cursor: 'pointer',
                         padding: '4px',
                         borderRadius: '4px',
                         backgroundColor: currentSolveNumber === num ? '#fff7ed' : (draggedItemIndex === idx ? 'var(--bg-secondary)' : (completedWords.has(num) ? '#e2e8f0' : 'transparent')),
                         border: currentSolveNumber === num ? '2px solid #ea580c' : '1px solid transparent',
                         transition: 'all 0.2s',
                         boxShadow: currentSolveNumber === num ? '0 2px 4px rgba(234, 88, 12, 0.2)' : 'none'
+                      }}
+                      onClick={() => {
+                        if (appMode === 'answer' || isCheckMode) {
+                          setCurrentSolveNumber(num);
+                          setSolveCandidates([num]);
+                          setSolveCandidateIndex(0);
+                        }
                       }}
                       onDragEnd={() => setDraggedItemIndex(null)}
                     >

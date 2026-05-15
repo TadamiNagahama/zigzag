@@ -41,10 +41,10 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown,
       setDragPath([{ x, y }]);
       setDragStartMousePos({ x: event.clientX, y: event.clientY });
       setMousePos({ x: event.clientX, y: event.clientY });
-    } else if (event.button === 2 && isCheckMode) { // 右クリック（セルフモードのみ）
+    } else if (event.button === 2 && (isCheckMode || appMode === 'answer')) { // 右クリック
       event.preventDefault();
       setRightDragActive(true);
-      onCellRightClick(x, y, event); // 最初のセルを即消去
+      onCellRightClick(x, y, event);
     }
   };
 
@@ -56,8 +56,8 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown,
         return [...prev, { x, y }];
       });
     }
-    // 右ドラッグ中の連続消し（セルフモードのみ）
-    if (rightDragActive && isCheckMode) {
+    // 右ドラッグ中の連続消し
+    if (rightDragActive && (isCheckMode || appMode === 'answer')) {
       onCellRightClick(x, y, event);
     }
   };
@@ -130,8 +130,8 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown,
                y >= Math.min(dragStart.y, lastPoint.y) && y <= Math.max(dragStart.y, lastPoint.y))
             : dragPath.some(p => p.x === x && p.y === y);
           const isFocused = focusedCell && focusedCell.x === x && focusedCell.y === y;
-          const isHighlightedDrawn = isCheckMode && dragStart && highlightedDrawnCells.some(p => p.x === x && p.y === y);
-          const isYellowHighlight = isCheckMode && dragStart && (isInDrag || isHighlightedDrawn);
+          const isHighlightedDrawn = (isCheckMode || appMode === 'answer') && dragStart && highlightedDrawnCells.some(p => p.x === x && p.y === y);
+          const isYellowHighlight = (isCheckMode || appMode === 'answer') && dragStart && (isInDrag || isHighlightedDrawn);
 
           return (
             <div
@@ -142,7 +142,8 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown,
               onMouseUp={handleMouseUp}
               onContextMenu={(e) => {
                 e.preventDefault();
-                if (!rightDragActive) onCellRightClick(x, y, e); // ドラッグ中は通常コンテキストメニューを抑止
+                // ドラッグ開始時以外でも確実に右クリック消去を走らせる
+                onCellRightClick(x, y, e);
               }}
               style={{
                 gridColumn: `span ${spanW}`,
