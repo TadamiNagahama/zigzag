@@ -17,7 +17,9 @@ import { HelpDialog } from './components/HelpDialog'
 import { WelcomeDialog } from './components/WelcomeDialog'
 import { exportToExcel } from './utils/excelExport'
 import { analyzeExcelFile, type ExcelImportResult, convertManualImportToPuzzle } from './utils/excelImport'
+import { solveZigzagAsync } from './utils/zigzagSolver'
 import { ImportPreviewDialog } from './components/ImportPreviewDialog'
+import { SolveChoiceDialog } from './components/SolveChoiceDialog'
 import type { ManualImportConfig } from './utils/excelImport'
 import { auth, dbFirestore, googleProvider } from './models/firebase'
 import { signInWithPopup, signOut, onAuthStateChanged, type User } from 'firebase/auth'
@@ -300,6 +302,11 @@ function App() {
   const [currentSolveNumber, setCurrentSolveNumber] = useState<number | null>(null);
   const [solveCandidates, setSolveCandidates] = useState<number[]>([]);
   const [solveCandidateIndex, setSolveCandidateIndex] = useState(0);
+
+  const [isSolving, setIsSolving] = useState(false);
+  const [showSolveChoice, setShowSolveChoice] = useState(false);
+  const [solverLogs, setSolverLogs] = useState<string[]>([]);
+  const [showSolverLogs, setShowSolverLogs] = useState(false);
 
   // クラウド自動保存の設定（デフォルトOFF）
   const [cloudAutoSave, setCloudAutoSave] = useState(() => {
@@ -1092,8 +1099,67 @@ function App() {
   };
 
   const handleAutoSolve = () => {
-    // 自動解答の実装（現在はプレースホルダー）
-    setAlertMessage('自動解答機能は現在準備中です。');
+    // 制限チェック
+    const hasShaded = puzzle.cells.some(row => row.some(c => c.isShaded));
+    const hasMerged = puzzle.cells.some(row => row.some(c => c.mergedSize || c.mergedParent));
+    if (puzzle.puzzleType !== 'ノーマル' || hasShaded || hasMerged) {
+      setAlertMessage('自動解答は現在「ノーマル」かつ「網掛けなし」「結合なし」の問題にのみ対応しています。');
+      return;
+    }
+
+    // 盤面に回答が入っているかチェック
+    const hasAnswers = puzzle.cells.some(row => row.some(c => c.answerChar !== ''));
+    if (hasAnswers) {
+      setShowSolveChoice(true);
+    } else {
+      runAutoSolve(false);
+    }
+  };
+
+  const runAutoSolve = async (resetBoard: boolean) => {
+    setShowSolveChoice(false);
+    setIsSolving(true);
+
+    let startPuzzle = puzzle;
+    if (resetBoard) {
+      startPuzzle = {
+        ...puzzle,
+        cells: puzzle.cells.map(row => row.map(c => ({ ...c, answerChar: '' })))
+      };
+      setPuzzle(startPuzzle);
+    }
+
+    setSolverLogs([]);
+    setShowSolverLogs(true);
+    try {
+      const result = await solveZigzagAsync(
+        startPuzzle, 
+        async (updatedCells) => {
+          setPuzzle(prev => ({ ...prev, cells: updatedCells, updatedAt: Date.now() }));
+        },
+        (msg) => {
+          setSolverLogs(prev => [...prev, msg].slice(-100)); // 直近100件を保持
+        }
+      );
+
+      // 最終結果をpushして履歴に残す
+      pushPuzzle(prev => ({
+        ...prev,
+        cells: result.solvedCells,
+        updatedAt: Date.now()
+      }));
+
+      if (result.success) {
+        setAlertMessage('🎉 自動解答が完了しました！');
+      } else {
+        setAlertMessage(result.message);
+      }
+    } catch (e) {
+      console.error('Auto solve error:', e);
+      setAlertMessage('自動解答中にエラーが発生しました。');
+    } finally {
+      setIsSolving(false);
+    }
   };
 
   const validateManuscript = () => {
@@ -2627,6 +2693,90 @@ function App() {
         ref={fileInputRef}
         onChange={handleFileChange}
       />
+
+      {showSolveChoice && (
+        <SolveChoiceDialog 
+          onStartFromScratch={() => runAutoSolve(true)}
+          onStartFromCurrent={() => runAutoSolve(false)}
+          onCancel={() => setShowSolveChoice(false)}
+        />
+      )}
+
+      {showSolverLogs && (
+        <div style={{ 
+          position: 'fixed', 
+          bottom: '24px', 
+          right: '24px', 
+          zIndex: 5000
+        }}>
+          <div className="glass card" style={{ 
+            padding: '12px 24px', 
+            display: 'flex', 
+            flexDirection: 'column', 
+            gap: '8px',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+            border: '1px solid var(--primary-color)',
+            maxHeight: '300px',
+            width: '320px',
+            pointerEvents: 'auto'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                {isSolving ? <div className="spinner" style={{ width: '20px', height: '20px' }} /> : null}
+                <span style={{ fontWeight: 'bold', fontSize: '0.9rem' }}>
+                  {isSolving ? '自動解答を実行中...' : '自動解答 ログ'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                <button 
+                  onClick={() => {
+                    const blob = new Blob([solverLogs.join('\n')], { type: 'text/plain' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'zigzag_solve_log.txt';
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                  style={{ 
+                    background: 'none', 
+                    border: '1px solid var(--border-color)', 
+                    borderRadius: '4px',
+                    cursor: 'pointer', 
+                    fontSize: '0.7rem',
+                    color: 'var(--text-muted)',
+                    padding: '2px 6px'
+                  }}
+                >保存</button>
+                <button 
+                  onClick={() => setShowSolverLogs(false)}
+                  style={{ 
+                    background: 'none', 
+                    border: 'none', 
+                    cursor: 'pointer', 
+                    fontSize: '1.2rem',
+                    color: 'var(--text-muted)',
+                    padding: '0 4px'
+                  }}
+                >×</button>
+              </div>
+            </div>
+            <div style={{ 
+              fontSize: '0.75rem', 
+              color: 'var(--text-muted)', 
+              overflowY: 'auto', 
+              maxHeight: '220px',
+              borderTop: '1px solid var(--border-color)',
+              paddingTop: '8px'
+            }}>
+              {solverLogs.slice().reverse().map((log, i) => (
+                <div key={i} style={{ marginBottom: '4px', borderBottom: '1px solid #f1f5f9', paddingBottom: '2px' }}>{log}</div>
+              ))}
+              {solverLogs.length === 0 && <div style={{ textAlign: 'center', padding: '20px' }}>ログはありません</div>}
+            </div>
+          </div>
+        </div>
+      )}
     </Layout>
   )
 }

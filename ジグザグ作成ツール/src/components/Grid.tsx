@@ -21,6 +21,7 @@ interface GridProps {
   isNumbersHidden?: boolean;
   isIrregularNumbersDisplay?: boolean;
   sharedCells?: Record<string, number[]>;
+  highlightedDrawnCells?: { x: number, y: number }[];
   completedWords?: Set<number>;
   currentSolveNumber?: number | null;
 }
@@ -128,8 +129,8 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown,
                y >= Math.min(dragStart.y, lastPoint.y) && y <= Math.max(dragStart.y, lastPoint.y))
             : dragPath.some(p => p.x === x && p.y === y);
           const isFocused = focusedCell && focusedCell.x === x && focusedCell.y === y;
-          const isHighlightedDrawn = appMode === 'answer' && dragStart && highlightedDrawnCells.some(p => p.x === x && p.y === y);
-          const isYellowHighlight = appMode === 'answer' && dragStart && (isInDrag || isHighlightedDrawn);
+          const isHighlightedDrawn = appMode === 'answer' && highlightedDrawnCells.some(p => p.x === x && p.y === y);
+          const isYellowHighlight = appMode === 'answer' && (isInDrag || isHighlightedDrawn);
 
           return (
             <div
@@ -277,7 +278,7 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown,
       {/* トレース・ヘルプパネル (ドラッグ中のみ表示) */}
       {dragStart && appMode === 'answer' && (() => {
         const startCell = cells[dragStart.y][dragStart.x];
-        const popupNum = startCell.number;
+        const popupNum = startCell.number || currentSolveNumber;
         const word = popupNum ? wordList[popupNum] : null;
         if (!word) return null;
 
