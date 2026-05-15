@@ -16,7 +16,7 @@ interface SettingsDialogProps {
 }
 
 const SHADING_COLORS = [
-  { label: 'グレー', value: '#e2e8f0' },
+  { label: 'グリーン', value: '#f0fdf4' },
   { label: 'ブルー', value: '#bee3f8' },
   { label: 'オレンジ', value: '#feebc8' },
   { label: 'ピンク', value: '#fed7e2' },

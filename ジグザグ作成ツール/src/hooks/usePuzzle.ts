@@ -25,7 +25,7 @@ const createEmptyPuzzle = (w: number, h: number): PuzzleData => {
     isWList: false,
     isWListStar: false,
     wordList2: [''],
-    shadingColor: '#e2e8f0', // デフォルトは薄いグレー (slate-200相当)
+    shadingColor: '#f0fdf4', // デフォルトは薄い緑
     boardFontWeight: 'normal',
     boardFontFamily: '',
     updatedAt: Date.now()

@@ -22,6 +22,7 @@ interface LayoutProps {
   appMode: 'shade' | 'edit' | 'answer';
   onModeChange: (mode: 'shade' | 'edit' | 'answer') => void;
   onImportExcel?: () => void;
+  hasShading?: boolean;
 }
 
 export const Layout: React.FC<LayoutProps> = ({ 
@@ -30,7 +31,8 @@ export const Layout: React.FC<LayoutProps> = ({
   user, onLogin, onLogout, onHelp, onSettings,
   activeTab, onTabChange,
   appMode, onModeChange,
-  onImportExcel
+  onImportExcel,
+  hasShading
 }) => {
   return (
     <div className="layout-container">
@@ -118,6 +120,10 @@ export const Layout: React.FC<LayoutProps> = ({
             <button 
               onClick={() => { onTabChange('board'); onModeChange('shade'); }}
               className={`mobile-nav-btn mode-btn ${activeTab === 'board' && appMode === 'shade' ? 'active' : ''}`}
+              style={{
+                backgroundColor: (activeTab !== 'board' || appMode !== 'shade') && hasShading ? 'rgba(99, 102, 241, 0.3)' : undefined,
+                color: (activeTab !== 'board' || appMode !== 'shade') && hasShading ? 'var(--primary-color)' : undefined
+              }}
             >
               <Square size={16} />
               <span>網掛け</span>

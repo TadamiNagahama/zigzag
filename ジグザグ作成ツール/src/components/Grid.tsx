@@ -21,13 +21,11 @@ interface GridProps {
   isNumbersHidden?: boolean;
   isIrregularNumbersDisplay?: boolean;
   sharedCells?: Record<string, number[]>;
-  isCheckMode?: boolean;
-  highlightedDrawnCells?: { x: number, y: number }[];
   completedWords?: Set<number>;
   currentSolveNumber?: number | null;
 }
 
-export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown, onCellRightClick, onDragSelection, onDragPath, cellSize = 40, appMode = 'edit', focusedCell = null, composingText = '', shadingColor = '#e2e8f0', wordList = {}, boardFontWeight = 'normal', boardFontFamily = '', isNumbersHidden = false, isIrregularNumbersDisplay = false, sharedCells = {}, isCheckMode = false, highlightedDrawnCells = [], completedWords = new Set(), currentSolveNumber = null }) => {
+export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown, onCellRightClick, onDragSelection, onDragPath, cellSize = 40, appMode = 'edit', focusedCell = null, composingText = '', shadingColor = '#f0fdf4', wordList = {}, boardFontWeight = 'normal', boardFontFamily = '', isNumbersHidden = false, isIrregularNumbersDisplay = false, sharedCells = {}, highlightedDrawnCells = [], completedWords = new Set(), currentSolveNumber = null }) => {
   const [dragStart, setDragStart] = useState<{ x: number, y: number } | null>(null);
   const [dragPath, setDragPath] = useState<{ x: number, y: number }[]>([]);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
@@ -41,7 +39,7 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown,
       setDragPath([{ x, y }]);
       setDragStartMousePos({ x: event.clientX, y: event.clientY });
       setMousePos({ x: event.clientX, y: event.clientY });
-    } else if (event.button === 2 && (isCheckMode || appMode === 'answer')) { // 右クリック
+    } else if (event.button === 2 && appMode === 'answer') { // 右クリック
       event.preventDefault();
       setRightDragActive(true);
       onCellRightClick(x, y, event);
@@ -57,7 +55,7 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown,
       });
     }
     // 右ドラッグ中の連続消し
-    if (rightDragActive && (isCheckMode || appMode === 'answer')) {
+    if (rightDragActive && appMode === 'answer') {
       onCellRightClick(x, y, event);
     }
   };
@@ -73,9 +71,9 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown,
       if (dragPath.length === 1) {
         onCellClick(dragStart.x, dragStart.y);
       } else {
-        if (onDragPath && (appMode === 'answer' || isCheckMode)) {
+        if (onDragPath && appMode === 'answer') {
           onDragPath(dragPath);
-        } else if (onDragSelection && !isCheckMode) {
+        } else if (onDragSelection) {
           const last = dragPath[dragPath.length - 1];
           onDragSelection(dragStart.x, dragStart.y, last.x, last.y);
         }
@@ -125,13 +123,13 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown,
 
           // ドラッグ選択中のハイライト判定
           const lastPoint = dragPath[dragPath.length - 1];
-          const isInDrag = (appMode === 'edit' && !isCheckMode && dragStart && lastPoint)
+          const isInDrag = (appMode === 'edit' && dragStart && lastPoint)
             ? (x >= Math.min(dragStart.x, lastPoint.x) && x <= Math.max(dragStart.x, lastPoint.x) &&
                y >= Math.min(dragStart.y, lastPoint.y) && y <= Math.max(dragStart.y, lastPoint.y))
             : dragPath.some(p => p.x === x && p.y === y);
           const isFocused = focusedCell && focusedCell.x === x && focusedCell.y === y;
-          const isHighlightedDrawn = (isCheckMode || appMode === 'answer') && dragStart && highlightedDrawnCells.some(p => p.x === x && p.y === y);
-          const isYellowHighlight = (isCheckMode || appMode === 'answer') && dragStart && (isInDrag || isHighlightedDrawn);
+          const isHighlightedDrawn = appMode === 'answer' && dragStart && highlightedDrawnCells.some(p => p.x === x && p.y === y);
+          const isYellowHighlight = appMode === 'answer' && dragStart && (isInDrag || isHighlightedDrawn);
 
           return (
             <div
@@ -155,11 +153,11 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown,
                   ? 'var(--wall-color)' 
                   : ((cell.answerKey && (appMode === 'shade' || appMode === 'answer' || appMode === 'edit'))
                       ? '#dcfce7' 
-                      : ((cell.isShaded && (appMode === 'shade' || appMode === 'answer'))
+                      : ((cell.isShaded && (appMode === 'shade' || appMode === 'answer' || appMode === 'edit'))
                           ? shadingColor 
                           : (cell.number !== null && completedWords.has(cell.number) ? '#e2e8f0' : 'white'))),
-                backgroundImage: (cell.isShaded && (appMode === 'shade' || appMode === 'answer')) 
-                  ? 'repeating-linear-gradient(45deg, transparent, transparent 2px, rgba(0,0,0,0.1) 2px, rgba(0,0,0,0.1) 4px)' 
+                backgroundImage: (cell.isShaded && (appMode === 'shade' || appMode === 'answer' || appMode === 'edit')) 
+                  ? 'repeating-linear-gradient(45deg, transparent, transparent 2px, rgba(34, 197, 94, 0.3) 2px, rgba(34, 197, 94, 0.3) 4px)' 
                   : 'none',
                 display: 'flex',
                 alignItems: 'center',
@@ -260,13 +258,13 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown,
                 </>
               )}
 
-              {/* Layer 2: 前面網掛け (文字を覆う) - 網掛けモード or Wリストモード時 */}
+              {/* Layer 2: 前面網掛け (文字を覆う) - 網掛けモード時 */}
               {(appMode === 'shade' && cell.isShaded) && (
                 <div style={{
                   position: 'absolute',
                   top: 0, left: 0, right: 0, bottom: 0,
                   backgroundColor: cell.answerKey ? 'transparent' : shadingColor, // 解答マスの場合は背景を透かして緑を見せる
-                  backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 2px, rgba(0,0,0,0.1) 2px, rgba(0,0,0,0.1) 4px)',
+                  backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 2px, rgba(34, 197, 94, 0.3) 2px, rgba(34, 197, 94, 0.3) 4px)',
                   zIndex: 4,
                   pointerEvents: 'none'
                 }} />
@@ -277,13 +275,9 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown,
       )}
 
       {/* トレース・ヘルプパネル (ドラッグ中のみ表示) */}
-      {dragStart && (appMode === 'answer' || isCheckMode) && (() => {
+      {dragStart && appMode === 'answer' && (() => {
         const startCell = cells[dragStart.y][dragStart.x];
-        // セルフモードの場合: currentSolveNumber優先でその単語を表示（途中マスから開始した場合も対応）
-        // それ以外はドラッグ開始マスの数字を使う
-        const popupNum = isCheckMode
-          ? (currentSolveNumber ?? startCell.number)
-          : startCell.number;
+        const popupNum = startCell.number;
         const word = popupNum ? wordList[popupNum] : null;
         if (!word) return null;
 
