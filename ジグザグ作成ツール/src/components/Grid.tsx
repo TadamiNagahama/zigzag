@@ -24,9 +24,10 @@ interface GridProps {
   highlightedDrawnCells?: { x: number, y: number }[];
   completedWords?: Set<number>;
   currentSolveNumber?: number | null;
+  isSolving?: boolean;
 }
 
-export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown, onCellRightClick, onDragSelection, onDragPath, cellSize = 40, appMode = 'edit', focusedCell = null, composingText = '', shadingColor = '#dbeafe', wordList = {}, boardFontWeight = 'normal', boardFontFamily = '', isNumbersHidden = false, isIrregularNumbersDisplay = false, sharedCells = {}, highlightedDrawnCells = [], completedWords = new Set(), currentSolveNumber = null }) => {
+export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown, onCellRightClick, onDragSelection, onDragPath, cellSize = 40, appMode = 'edit', focusedCell = null, composingText = '', shadingColor = '#dbeafe', wordList = {}, boardFontWeight = 'normal', boardFontFamily = '', isNumbersHidden = false, isIrregularNumbersDisplay = false, sharedCells = {}, highlightedDrawnCells = [], completedWords = new Set(), currentSolveNumber = null, isSolving = false }) => {
   const [dragStart, setDragStart] = useState<{ x: number, y: number } | null>(null);
   const [dragPath, setDragPath] = useState<{ x: number, y: number }[]>([]);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
@@ -187,7 +188,7 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown,
                   color: 'var(--text-main)',
                   fontWeight: 'bold',
                   zIndex: 3,
-                  display: ((appMode === 'shade' && cell.isShaded) || isNumbersHidden || isIrregularNumbersDisplay) ? 'none' : 'block'
+                  display: ((appMode === 'shade' && cell.isShaded) || isNumbersHidden || isIrregularNumbersDisplay || (appMode === 'answer' && isSolving && cell.isShaded && !cell.isRevealed)) ? 'none' : 'block'
                 }}>
                   {cell.number}
                 </span>
@@ -206,7 +207,8 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown,
                   zIndex: 4,
                   pointerEvents: 'none',
                   wordBreak: 'break-all',
-                  maxWidth: '100%'
+                  maxWidth: '100%',
+                  display: (appMode === 'answer' && isSolving && cell.isShaded && !cell.isRevealed) ? 'none' : 'block'
                 }}>
                   {sharedCells[`${cell.x},${cell.y}`].join('・')}
                 </div>
@@ -222,7 +224,7 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown,
                 opacity: (isFocused && composingText) ? 0.7 : 1,
                 zIndex: (appMode === 'shade' && cell.isShaded && cell.answerKey) ? 5 : 2,
                 position: 'relative',
-                display: (isNumbersHidden && cell.isNumbered) || (isIrregularNumbersDisplay && appMode !== 'answer') || (appMode === 'shade' && cell.isShaded && !cell.answerKey) ? 'none' : 'block'
+                display: (isNumbersHidden && cell.isNumbered) || (isIrregularNumbersDisplay && appMode !== 'answer') || (appMode === 'shade' && cell.isShaded && !cell.answerKey) || (appMode === 'answer' && isSolving && cell.isShaded && !cell.isRevealed) ? 'none' : 'block'
               }}>
                 {(isFocused && composingText) 
                   ? composingText 
@@ -251,7 +253,7 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown,
                     right: '1px',
                     color: '#dc2626',
                     fontWeight: 'bold',
-                    display: (appMode === 'shade' && cell.isShaded && !cell.answerKey) ? 'none' : 'block',
+                    display: 'block',
                     zIndex: (appMode === 'shade' && cell.isShaded && cell.answerKey) ? 5 : 2
                   }}>
                     {cell.answerKey}

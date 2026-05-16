@@ -16,7 +16,7 @@ interface SolverNode {
   reservedBy: Set<number>;
   reservedChars: Set<string>;
   candidates: Set<string>; // 既存の候補管理
-  
+
   // 超モード用
   numberCandidates?: Set<number>;
   hiddenCorrectNumber?: number | null;
@@ -43,7 +43,7 @@ export type SolverLogCallback = (message: string) => void;
  * ジグザグ解答ロジック (非同期版)
  */
 export async function solveZigzagAsync(
-  puzzle: PuzzleData, 
+  puzzle: PuzzleData,
   onStep: SolverStepCallback,
   onLog?: SolverLogCallback
 ): Promise<SolveResult> {
@@ -77,7 +77,7 @@ export async function solveZigzagAsync(
             node.currentChar = w.text[0];
             node.isFixed = true;
           }
-          changed = true;
+          //changed = true;
         }
       }
       // 2文字目以降も、もし固定ノードIDがあれば文字を同期
@@ -99,14 +99,20 @@ export async function solveZigzagAsync(
     if (onStep) {
       // メインのデータを壊さないよう、表示用のコピーを作成して隠蔽処理を行う
       const displayCells = currentCells.map(row => row.map(c => ({ ...c })));
-      
+
       for (const node of nodeMap.values()) {
         const cell = displayCells[node.y][node.x];
-        
-        // 網掛けマスの場合は、一旦原稿の文字（char/answerChar）を非表示にする
+
+        // 網掛けマスの表示制御
         if (isChoMode && puzzle.cells[node.y][node.x].isShaded) {
-          cell.char = '';
-          cell.answerChar = '';
+          // エンジンが特定したか、あるいは元々表示されていた（途中からモード等）場合は表示する
+          if (node.isFixed || node.logiNumber !== null || puzzle.cells[node.y][node.x].isRevealed) {
+            cell.isRevealed = true;
+          } else {
+            cell.isRevealed = false;
+          }
+        } else {
+          cell.isRevealed = true;
         }
 
         if (node.isFixed) {
@@ -114,11 +120,8 @@ export async function solveZigzagAsync(
         }
 
         // 数字の同期 (表示用)
-        // 解答エンジンが「このマスはN番である」と特定（logiNumberをセット）した場合のみ数字を表示する
         if (node.logiNumber !== null) {
           cell.number = node.logiNumber;
-        } else if (isChoMode && puzzle.cells[node.y][node.x].isShaded) {
-          cell.number = null; // 未確定の網掛けは表示上隠す
         }
       }
       await onStep(displayCells);
@@ -139,15 +142,21 @@ export async function solveZigzagAsync(
       }
 
       const id = `${x},${y}`;
-      // 超モード（網掛け）の場合は、原稿に数字や文字があっても解答開始時は隠蔽する
+      // 超モード（網掛け）の場合の初期化
       const isActuallyShaded = cell.isShaded;
+
+      // 「途中から」の場合、既に入力されている文字は固定として扱う
+      const hasInitialChar = cell.answerChar !== '';
+      const isInitiallyRevealed = cell.isRevealed;
+
       const node: SolverNode = {
         id,
         x,
         y,
-        isFixed: isActuallyShaded ? false : (cell.char !== '' || (cell.number !== null)),
-        currentChar: isActuallyShaded ? '' : cell.char,
-        logiNumber: isActuallyShaded ? null : cell.number,
+        // 網掛けマスでも、既に入力があれば固定
+        isFixed: isActuallyShaded ? (hasInitialChar || isInitiallyRevealed) : (cell.char !== '' || (cell.number !== null)),
+        currentChar: isActuallyShaded ? (hasInitialChar ? cell.answerChar : '') : cell.char,
+        logiNumber: isActuallyShaded ? (isInitiallyRevealed ? cell.number : null) : cell.number,
         neighbors: [],
         reservedBy: new Set(),
         reservedChars: new Set(),
@@ -284,7 +293,7 @@ export async function solveZigzagAsync(
 
       const nx = startNode.x + dx;
       const ny = startNode.y + dy;
-      
+
       if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
         return {
           success: false,
@@ -344,7 +353,7 @@ export async function solveZigzagAsync(
       wordCharCandidates.set(w.logiNumber, candidatesByPos);
 
       const dfs = (currId: string, charIdx: number) => {
-        if (charIdx === w.length) return; 
+        if (charIdx === w.length) return;
         const currNode = nodeMap.get(currId)!;
         const targetChar = w.text[charIdx];
         const nextFixedId = w.fixedNodeIDs[charIdx + 1];
@@ -384,7 +393,7 @@ export async function solveZigzagAsync(
     for (const [vNum, vCands] of wordCharCandidates.entries()) {
       if (vNum === wNum) continue;
       const wordV = solverWords.find(sw => sw.logiNumber === vNum)!;
-      
+
       for (const [vPos, candV] of vCands.entries()) {
         if (wordW.text[pos] !== wordV.text[vPos]) continue;
         const intersection = Array.from(candW).filter(id => candV.has(id));
@@ -483,7 +492,7 @@ export async function solveZigzagAsync(
       const used = getUsedNodes(w, fixedLen);
       const paths: { nid: string, char: string }[][] = [];
       const currentPath: { nid: string, char: string }[] = [];
-      
+
       const dfs = (currId: string, charIdx: number) => {
         if (charIdx === w.length) {
           paths.push([...currentPath]);
@@ -573,7 +582,7 @@ export async function solveZigzagAsync(
       // この位置の共有候補セルが1つだけの場合
       if (oppsW.size === 1) {
         const [nid, partnerSet] = Array.from(oppsW.entries())[0];
-        
+
         // 単語内競合チェック
         let hasSelfConflict = false;
         for (let k = 1; k < w.text.length; k++) {
@@ -601,15 +610,15 @@ export async function solveZigzagAsync(
 
         // パートナー側チェック
         let allPartnersDecisive = true;
-        
+
         // 確定済みセルとの共有の場合は、そのセル自体が既に確定しているので
         // 「パートナー側が迷っている」という概念はないが、
         // もし partnerSet に FIXED 以外も混ざっているなら、それらも decisive である必要がある。
-        
+
         for (const pNum of partnerNums) {
           const pWord = solverWords.find(sw => sw.logiNumber === pNum)!;
           const pCands = wordCharCandidates.get(pNum);
-          
+
           // パートナー単語における共有候補箇所のリスト
           const sharingPositionsP: { pos: number, opps: Map<string, Set<string>> }[] = [];
           for (let j = 1; j < pWord.text.length; j++) {
@@ -662,12 +671,12 @@ export async function solveZigzagAsync(
           // アンカーを打つ
           w.fixedNodeIDs[i + 1] = nid;
           for (const pStr of partnerSet) {
-             if (pStr === 'FIXED:0') continue;
-             const [pNumStr, pPosStr] = pStr.split(':');
-             const pNum = parseInt(pNumStr, 10);
-             const pPos = parseInt(pPosStr, 10);
-             const pWord = solverWords.find(sw => sw.logiNumber === pNum)!;
-             pWord.fixedNodeIDs[pPos + 1] = nid;
+            if (pStr === 'FIXED:0') continue;
+            const [pNumStr, pPosStr] = pStr.split(':');
+            const pNum = parseInt(pNumStr, 10);
+            const pPos = parseInt(pPosStr, 10);
+            const pWord = solverWords.find(sw => sw.logiNumber === pNum)!;
+            pWord.fixedNodeIDs[pPos + 1] = nid;
           }
           await reportStep();
           changed = true;
@@ -788,7 +797,7 @@ export async function solveZigzagAsync(
       const startNodeId = w.fixedNodeIDs[fixedLen]!;
       const remainingText = w.text.slice(fixedLen);
       const usedInWord = getUsedNodes(w, fixedLen);
-      
+
       const paths: string[][] = [];
       const MAX_PATHS = 500;
       let overflow = false;
@@ -819,7 +828,7 @@ export async function solveZigzagAsync(
 
       findPaths(startNodeId, 0, []);
 
-      if (paths.length === 0) continue; 
+      if (paths.length === 0) continue;
       if (overflow) {
         log(`単語 [${w.logiNumber}] の可能経路が多すぎるためボトルネック解析をスキップします`);
         continue;
@@ -839,7 +848,7 @@ export async function solveZigzagAsync(
           const idx = path.indexOf(nid);
           charSet.add(remainingText[idx]);
         }
-        
+
         if (!nodeToMandatoryWords.has(nid)) {
           nodeToMandatoryWords.set(nid, new Map());
         }
@@ -888,7 +897,7 @@ export async function solveZigzagAsync(
         const id = `${x},${y}`;
         const node = nodeMap.get(id);
         if (!node) continue;
-        
+
         const cell = cells[y][x];
         if ((cell.number !== null && !cell.isShaded) || cell.isShaded) {
           candidateNodes.push(node);
@@ -969,16 +978,16 @@ export async function solveZigzagAsync(
     let stable = false;
     while (!stable) {
       stable = true;
-      if (await executeLogicalLoop()) { 
-        stable = false; 
-        collectWordCandidates(); 
+      if (await executeLogicalLoop()) {
+        stable = false;
+        collectWordCandidates();
       }
     }
-    
+
     log("--- 確定文字との共有化 (Type 1) 開始 ---");
-    if (await solveFixedSharing()) { 
+    if (await solveFixedSharing()) {
       totalChanged = true;
-      continue; 
+      continue;
     }
 
     log("--- ボトルネック共有化 (Phase 3) 開始 ---");
@@ -994,18 +1003,20 @@ export async function solveZigzagAsync(
     }
   }
 
-  const finalCells = currentCells.map(row => row.map(c => ({ ...c })));
+  const finalCells = currentCells.map((row, y) => row.map((c, x) => ({ ...cells[y][x] })));
   let allCellsFilled = true;
   for (const node of nodeMap.values()) {
     const cell = finalCells[node.y][node.x];
-    
-    // 網掛けマスの隠蔽（特定できていないものは隠す）
+
+    // 網掛けマスの表示制御
     if (isChoMode && cell.isShaded) {
-      cell.char = '';
-      cell.answerChar = '';
-      if (node.logiNumber === null) {
-        cell.number = null;
+      if (node.isFixed || node.logiNumber !== null || cells[node.y][node.x].isRevealed) {
+        cell.isRevealed = true;
+      } else {
+        cell.isRevealed = false;
       }
+    } else {
+      cell.isRevealed = true;
     }
 
     if (node.isFixed) {

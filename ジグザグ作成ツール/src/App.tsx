@@ -1075,7 +1075,21 @@ function App() {
     if (resetBoard) {
       startPuzzle = {
         ...puzzle,
-        cells: puzzle.cells.map(row => row.map(c => ({ ...c, answerChar: '' })))
+        cells: puzzle.cells.map(row => row.map(c => ({ 
+          ...c, 
+          answerChar: '', 
+          isRevealed: !c.isShaded // 網掛け以外は表示、網掛けは非表示
+        })))
+      };
+      setPuzzle(startPuzzle);
+    } else {
+      // 途中からの場合、既に入力がある網掛けマスを表示状態にする
+      startPuzzle = {
+        ...puzzle,
+        cells: puzzle.cells.map(row => row.map(c => ({ 
+          ...c, 
+          isRevealed: c.isRevealed || (c.isShaded && c.answerChar !== '') || !c.isShaded
+        })))
       };
       setPuzzle(startPuzzle);
     }
@@ -1106,15 +1120,10 @@ function App() {
         }));
         validateManuscript(solvedPuzzle);
       } else {
-        // 失敗：確定した文字は残すが、数字は必ず元の原稿から復元する
-        const mergedCells = result.solvedCells.map((row, y) => row.map((cell, x) => ({
-          ...cell,
-          number: cell.isShaded ? cell.number : originalCells[y][x].number
-        })));
-
+        // 失敗：結果をそのまま反映（zigzagSolver側で原稿保護と隠蔽が適用済み）
         pushPuzzle(prev => ({
           ...prev,
-          cells: mergedCells,
+          cells: result.solvedCells,
           updatedAt: Date.now()
         }));
         setAlertMessage(result.message);
@@ -2368,6 +2377,7 @@ function App() {
                         highlightedDrawnCells={highlightedDrawnCells}
                         completedWords={completedWords}
                         currentSolveNumber={currentSolveNumber}
+                        isSolving={isSolving}
                       />
                     </div>
                   </div>

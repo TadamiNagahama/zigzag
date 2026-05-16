@@ -16,6 +16,7 @@ export interface Cell {
   number: number | null; // 自動計算される番号 (1, 2, 3...)
   answerKey: string | null; // A, B, C... (解答キー。右下に表示)
   isShaded?: boolean; // 「超」問題用の網掛け
+  isRevealed?: boolean; // 超問題用：網掛けの下のデータが表示されているかどうか
   style: CellStyle;
   mergedParent?: { x: number, y: number }; // 結合されている場合の親マスの座標
   mergedSize?: { width: number, height: number }; // 結合サイズ (親マスのみが保持する)
