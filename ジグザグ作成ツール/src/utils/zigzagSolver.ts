@@ -167,6 +167,78 @@ export async function solveZigzagAsync(
     return `${col}${node.y + 1}`;
   };
 
+  await reportStep();
+
+  // 矢印問題の事前処理
+  if (puzzle.puzzleType === '矢印' || puzzle.isArrowMode) {
+    log("--- 矢印問題の事前処理 開始 ---");
+    for (const w of solverWords) {
+      if (w.length < 2) continue;
+      const arrow = puzzle.wordDirections?.[w.logiNumber];
+      if (!arrow || arrow === '?') {
+        return {
+          success: false,
+          message: `番号 ${w.logiNumber} の矢印が設定されていません。`,
+          solvedCells: currentCells
+        };
+      }
+
+      const startNodeId = w.fixedNodeIDs[1];
+      if (!startNodeId) {
+        log(`警告: 番号 ${w.logiNumber} の開始マスが盤面に見つかりません。`);
+        continue;
+      }
+      const startNode = nodeMap.get(startNodeId)!;
+
+      let dx = 0, dy = 0;
+      if (arrow === '↑') dy = -1;
+      else if (arrow === '→') dx = 1;
+      else if (arrow === '↓') dy = 1;
+      else if (arrow === '←') dx = -1;
+
+      const nx = startNode.x + dx;
+      const ny = startNode.y + dy;
+      
+      if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
+        return {
+          success: false,
+          message: `番号 ${w.logiNumber} の矢印が盤面外を指しています。`,
+          solvedCells: currentCells
+        };
+      }
+
+      const nCell = cells[ny][nx];
+      const targetX = nCell.mergedParent ? nCell.mergedParent.x : nx;
+      const targetY = nCell.mergedParent ? nCell.mergedParent.y : ny;
+      const nId = `${targetX},${targetY}`;
+      const nNode = nodeMap.get(nId);
+
+      if (!nNode) {
+        return {
+          success: false,
+          message: `番号 ${w.logiNumber} の矢印の先に有効なマスがありません。`,
+          solvedCells: currentCells
+        };
+      }
+
+      const char2 = w.text[1];
+      if (nNode.isFixed && nNode.currentChar !== char2) {
+        return {
+          success: false,
+          message: `番号 ${w.logiNumber} の矢印の先（${getExcelCoords(nNode)}）には既に別の文字 '${nNode.currentChar}' があります。`,
+          solvedCells: currentCells
+        };
+      }
+
+      if (!nNode.isFixed) {
+        fixNode(nNode, char2);
+        log(`番号 ${w.logiNumber} の2文字目 '${char2}' を矢印に従って ${getExcelCoords(nNode)} に配置`);
+      }
+      w.fixedNodeIDs[2] = nId;
+    }
+    await reportStep();
+  }
+
   // 共有候補情報の保持用
   let wordCharCandidates: Map<number, Map<number, Set<string>>> = new Map();
   let nodeCharUsage: Map<string, Map<string, Set<number>>> = new Map();
@@ -179,7 +251,7 @@ export async function solveZigzagAsync(
     for (const w of solverWords) {
       if (w.isUsed) continue;
       const fixedLen = getFixedLength(w);
-      if (fixedLen === w.length) continue;
+      if (fixedLen === 0 || fixedLen === w.length) continue;
       const startId = w.fixedNodeIDs[fixedLen]!;
       const used = getUsedNodes(w, fixedLen);
       const candidatesByPos: Map<number, Set<string>> = new Map();
@@ -258,7 +330,7 @@ export async function solveZigzagAsync(
 
       for (const w of solverWords) {
         const fixedLen = getFixedLength(w);
-        if (fixedLen === w.length) continue;
+        if (fixedLen === 0 || fixedLen === w.length) continue;
 
         if (w.fixedNodeIDs[fixedLen + 1]) {
           const targetId = w.fixedNodeIDs[fixedLen + 1]!;
@@ -315,6 +387,7 @@ export async function solveZigzagAsync(
     for (const w of solverWords) {
       if (w.isUsed) continue;
       const fixedLen = getFixedLength(w);
+      if (fixedLen === 0) continue;
       if (fixedLen === w.length) {
         w.isUsed = true;
         continue;
@@ -538,7 +611,7 @@ export async function solveZigzagAsync(
       for (const w of solverWords) {
         if (w.isUsed) continue;
         const fixedLen = getFixedLength(w);
-        if (fixedLen + d > w.length) continue;
+        if (fixedLen === 0 || fixedLen + d > w.length) continue;
         const targetChar = w.text[fixedLen + d - 1];
         const startId = w.fixedNodeIDs[fixedLen]!;
         const candidates = findNodesAtDistance(startId, d, w);

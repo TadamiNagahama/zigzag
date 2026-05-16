@@ -1103,15 +1103,28 @@ function App() {
 
   const handleAutoSolve = () => {
     // 制限チェック
-    const isNormalType = puzzle.puzzleType === 'ノーマル' || puzzle.puzzleType === '通常';
+    const currentType = puzzle.puzzleType || 'ノーマル';
+    const isSupportedType = currentType === 'ノーマル' || currentType === '通常' || currentType === '矢印';
     const hasShaded = puzzle.cells.some(row => row.some(c => c.isShaded));
     const hasMerged = puzzle.cells.some(row => row.some(c => 
       c.mergedParent || (c.mergedSize && (c.mergedSize.width > 1 || c.mergedSize.height > 1))
     ));
 
-    if (!isNormalType || hasShaded || hasMerged) {
-      console.log('AutoSolve restriction triggered:', { puzzleType: puzzle.puzzleType, hasShaded, hasMerged });
-      setAlertMessage('自動解答は現在「ノーマル」かつ「網掛けなし」「結合なし」の問題にのみ対応しています。');
+    if (!isSupportedType || hasShaded || hasMerged) {
+      console.log('AutoSolve restriction triggered:', { currentType, hasShaded, hasMerged });
+      
+      let detail = '';
+      if (!isSupportedType) detail = `パズル形式「${currentType}」は現在未対応です。`;
+      if (hasShaded) detail += (detail ? '\n' : '') + '網掛けマスが含まれています。';
+      if (hasMerged) detail += (detail ? '\n' : '') + '結合マス（大マス）が含まれています。';
+
+      setAlertMessage(
+        <div style={{ textAlign: 'left' }}>
+          <p>自動解答は現在「ノーマル」「矢印」かつ「網掛けなし」「結合なし」の問題にのみ対応しています。</p>
+          <p style={{ marginTop: '8px', color: '#dc2626', fontWeight: 'bold', fontSize: '0.9rem' }}>原因：</p>
+          <p style={{ color: '#dc2626', fontSize: '0.9rem', whiteSpace: 'pre-wrap' }}>{detail}</p>
+        </div>
+      );
       return;
     }
 
@@ -1166,7 +1179,7 @@ function App() {
       }
     } catch (e) {
       console.error('Auto solve error:', e);
-      setAlertMessage('自動解答中にエラーが発生しました。');
+      setAlertMessage(`自動解答中にエラーが発生しました。\n内容: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setIsSolving(false);
     }
