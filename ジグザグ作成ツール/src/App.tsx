@@ -1093,21 +1093,23 @@ function App() {
 
     try {
       const result = await solveZigzagAsync(startPuzzle, onStep, (msg) => {
-        setSolverLogs(prev => [...prev, msg].slice(-100));
+        setSolverLogs(prev => [...prev, msg]);
       });
 
       if (result.success) {
         // 成功：結果を履歴に保存し、反映する
+        const solvedPuzzle = { ...puzzle, cells: result.solvedCells };
         pushPuzzle(prev => ({
           ...prev,
           cells: result.solvedCells,
           updatedAt: Date.now()
         }));
+        validateManuscript(solvedPuzzle);
       } else {
         // 失敗：確定した文字は残すが、数字は必ず元の原稿から復元する
         const mergedCells = result.solvedCells.map((row, y) => row.map((cell, x) => ({
           ...cell,
-          number: originalCells[y][x].number
+          number: cell.isShaded ? cell.number : originalCells[y][x].number
         })));
 
         pushPuzzle(prev => ({
@@ -1556,7 +1558,9 @@ function App() {
                 {errors.map((e, i) => <li key={i} style={{ marginBottom: '4px' }}>{e}</li>)}
               </ul>
             </div>
-          );
+      );
+    } else {
+      setAlertMessage('バッチリです！すべての文字が正しく配置され、経路も完全に繋がっています。');
     }
   };
 

@@ -71,11 +71,13 @@ export async function solveZigzagAsync(
         const node = nodeMap.get(startNodeId);
         if (node && node.logiNumber === null) {
           node.logiNumber = w.logiNumber;
+          log(`[1文字目確定] ${w.logiNumber}番の開始位置を ${getExcelCoords(node)} と特定しました（単語の1文字目が配置されたため）`);
           // 1文字目は確定文字として扱う
           if (!node.isFixed) {
             node.currentChar = w.text[0];
             node.isFixed = true;
           }
+          changed = true;
         }
       }
       // 2文字目以降も、もし固定ノードIDがあれば文字を同期
@@ -100,13 +102,21 @@ export async function solveZigzagAsync(
       
       for (const node of nodeMap.values()) {
         const cell = displayCells[node.y][node.x];
+        
+        // 網掛けマスの場合は、一旦原稿の文字（char/answerChar）を非表示にする
+        if (isChoMode && puzzle.cells[node.y][node.x].isShaded) {
+          cell.char = '';
+          cell.answerChar = '';
+        }
+
         if (node.isFixed) {
           cell.answerChar = node.currentChar;
         }
+
         // 数字の同期 (表示用)
-        // 文字が判明している（isFixed）か、数字が特定されている（logiNumber）場合は数字を表示する
-        if (node.logiNumber !== null || node.isFixed) {
-          cell.number = node.logiNumber ?? puzzle.cells[node.y][node.x].number;
+        // 解答エンジンが「このマスはN番である」と特定（logiNumberをセット）した場合のみ数字を表示する
+        if (node.logiNumber !== null) {
+          cell.number = node.logiNumber;
         } else if (isChoMode && puzzle.cells[node.y][node.x].isShaded) {
           cell.number = null; // 未確定の網掛けは表示上隠す
         }
@@ -129,19 +139,21 @@ export async function solveZigzagAsync(
       }
 
       const id = `${x},${y}`;
+      // 超モード（網掛け）の場合は、原稿に数字や文字があっても解答開始時は隠蔽する
+      const isActuallyShaded = cell.isShaded;
       const node: SolverNode = {
         id,
         x,
         y,
-        isFixed: cell.char !== '' || (cell.number !== null && !cell.isShaded),
-        currentChar: cell.char,
-        logiNumber: cell.isShaded ? null : cell.number,
+        isFixed: isActuallyShaded ? false : (cell.char !== '' || (cell.number !== null)),
+        currentChar: isActuallyShaded ? '' : cell.char,
+        logiNumber: isActuallyShaded ? null : cell.number,
         neighbors: [],
         reservedBy: new Set(),
         reservedChars: new Set(),
         candidates: new Set(),
-        numberCandidates: cell.isShaded ? new Set() : undefined,
-        hiddenCorrectNumber: cell.isShaded ? cell.number : undefined,
+        numberCandidates: isActuallyShaded ? new Set() : undefined,
+        hiddenCorrectNumber: isActuallyShaded ? cell.number : undefined,
       };
       nodeMap.set(id, node);
     }
@@ -669,7 +681,7 @@ export async function solveZigzagAsync(
       if (node.isFixed) continue;
       if (charMap.size === 1) {
         const [char, words] = Array.from(charMap.entries())[0];
-        log(`セル ${getExcelCoords(node)} は文字 '${char}' のみが配置可能 (全候補が一致)`);
+        log(`セル ${getExcelCoords(node)} は文字 '${char}' のみが配置可能 (全候補が一致: リスト ${Array.from(words).sort((a, b) => a - b).join(', ')})`);
         fixNode(node, char);
         await reportStep();
         changed = true;
@@ -912,7 +924,7 @@ export async function solveZigzagAsync(
               const targetNode = candidateNodes[lastFoundIdx + k];
               const targetNum = lastFoundNum + k;
               if (targetNode.logiNumber === null) {
-                log(`地理的順序により、${getExcelCoords(targetNode)} は数字 ${targetNum} で確定しました`);
+                log(`[番号位置推論] ${targetNum}番は ${getExcelCoords(targetNode)} に入ると推論しました（連続番号の隙間の数とマスの数が一致）`);
                 targetNode.logiNumber = targetNum;
                 const word = solverWords.find(sw => sw.logiNumber === targetNum);
                 if (word) {
@@ -986,10 +998,24 @@ export async function solveZigzagAsync(
   let allCellsFilled = true;
   for (const node of nodeMap.values()) {
     const cell = finalCells[node.y][node.x];
+    
+    // 網掛けマスの隠蔽（特定できていないものは隠す）
+    if (isChoMode && cell.isShaded) {
+      cell.char = '';
+      cell.answerChar = '';
+      if (node.logiNumber === null) {
+        cell.number = null;
+      }
+    }
+
     if (node.isFixed) {
       cell.answerChar = node.currentChar;
     } else {
       allCellsFilled = false;
+    }
+
+    if (node.logiNumber !== null) {
+      cell.number = node.logiNumber;
     }
   }
 
