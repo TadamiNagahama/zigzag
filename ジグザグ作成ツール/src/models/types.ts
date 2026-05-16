@@ -21,7 +21,7 @@ export interface Cell {
   mergedSize?: { width: number, height: number }; // 結合サイズ (親マスのみが保持する)
 }
 
-export type PuzzleType = 'ノーマル' | 'Wリスト' | 'Wリスト★' | 'ナンバーレス' | '部分ナンバーレス' | 'ウルトラ' | '変則' | '矢印';
+export type PuzzleType = 'ノーマル' | '通常' | 'Wリスト' | 'Wリスト★' | 'ナンバーレス' | '部分ナンバーレス' | 'ウルトラ' | '変則' | '矢印';
 
 export interface PuzzleData {
   id?: number; // Dexie用のプライマリキー

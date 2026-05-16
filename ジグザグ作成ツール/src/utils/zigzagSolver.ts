@@ -162,6 +162,93 @@ export async function solveZigzagAsync(
     node.isFixed = true;
   };
 
+  const getExcelCoords = (node: SolverNode) => {
+    const col = String.fromCharCode(65 + node.x);
+    return `${col}${node.y + 1}`;
+  };
+
+  // 共有候補情報の保持用
+  let wordCharCandidates: Map<number, Map<number, Set<string>>> = new Map();
+  let nodeCharUsage: Map<string, Map<string, Set<number>>> = new Map();
+
+  // 単語の候補セル情報を収集
+  const collectWordCandidates = () => {
+    wordCharCandidates = new Map();
+    nodeCharUsage = new Map();
+
+    for (const w of solverWords) {
+      if (w.isUsed) continue;
+      const fixedLen = getFixedLength(w);
+      if (fixedLen === w.length) continue;
+      const startId = w.fixedNodeIDs[fixedLen]!;
+      const used = getUsedNodes(w, fixedLen);
+      const candidatesByPos: Map<number, Set<string>> = new Map();
+      wordCharCandidates.set(w.logiNumber, candidatesByPos);
+
+      const dfs = (currId: string, charIdx: number) => {
+        if (charIdx === w.length) return; 
+        const currNode = nodeMap.get(currId)!;
+        const targetChar = w.text[charIdx];
+        const nextFixedId = w.fixedNodeIDs[charIdx + 1];
+
+        for (const nid of currNode.neighbors) {
+          if (used.has(nid)) continue;
+          if (nextFixedId && nid !== nextFixedId) continue;
+          const nb = nodeMap.get(nid)!;
+          if (!nb.isFixed || nb.currentChar === targetChar) {
+            if (!candidatesByPos.has(charIdx)) candidatesByPos.set(charIdx, new Set());
+            candidatesByPos.get(charIdx)!.add(nid);
+
+            if (!nodeCharUsage.has(nid)) nodeCharUsage.set(nid, new Map());
+            const charMap = nodeCharUsage.get(nid)!;
+            if (!charMap.has(targetChar)) charMap.set(targetChar, new Set());
+            charMap.get(targetChar)!.add(w.logiNumber);
+
+            used.add(nid);
+            dfs(nid, charIdx + 1);
+            used.delete(nid);
+          }
+        }
+      };
+      dfs(startId, fixedLen);
+    }
+  };
+
+  // 共有チャンスの取得 (共通)
+  const getSharingOpportunities = (wNum: number, pos: number) => {
+    const opportunities = new Map<string, Set<string>>();
+    const candW = wordCharCandidates.get(wNum)?.get(pos);
+    if (!candW) return opportunities;
+
+    const wordW = solverWords.find(sw => sw.logiNumber === wNum)!;
+
+    // 1. 未使用単語との共有
+    for (const [vNum, vCands] of wordCharCandidates.entries()) {
+      if (vNum === wNum) continue;
+      const wordV = solverWords.find(sw => sw.logiNumber === vNum)!;
+      
+      for (const [vPos, candV] of vCands.entries()) {
+        if (wordW.text[pos] !== wordV.text[vPos]) continue;
+        const intersection = Array.from(candW).filter(id => candV.has(id));
+        for (const nid of intersection) {
+          if (!opportunities.has(nid)) opportunities.set(nid, new Set());
+          opportunities.get(nid)!.add(`${vNum}:${vPos}`);
+        }
+      }
+    }
+
+    // 2. 確定済みセルとの共有 (Type 1的な共有もカウントに含める)
+    for (const nid of candW) {
+      const node = nodeMap.get(nid)!;
+      if (node.isFixed && node.currentChar === wordW.text[pos]) {
+        if (!opportunities.has(nid)) opportunities.set(nid, new Set());
+        opportunities.get(nid)!.add(`FIXED:0`);
+      }
+    }
+
+    return opportunities;
+  };
+
   const executeLogicalLoop = async (): Promise<boolean> => {
     let overallChanged = false;
     let loopChanged = true;
@@ -299,125 +386,132 @@ export async function solveZigzagAsync(
    */
   const solveDynamicSharing = async (): Promise<boolean> => {
     let changed = false;
-    const nodeCharUsage = new Map<string, Map<string, Set<number>>>();
 
-    const getExcelCoords = (node: SolverNode) => {
-      const col = String.fromCharCode(65 + node.x);
-      return `${col}${node.y + 1}`;
-    };
-
-    // 1. 各単語の各位置における候補セルを収集 (DFS)
-    const wordCharCandidates: Map<number, Map<number, Set<string>>> = new Map();
+    // 2. 共有セル確定 (相互独占・相思相愛・単語内競合チェック)
     for (const w of solverWords) {
       if (w.isUsed) continue;
-      const fixedLen = getFixedLength(w);
-      if (fixedLen === w.length) continue;
-      const startId = w.fixedNodeIDs[fixedLen]!;
-      const used = getUsedNodes(w, fixedLen);
-      const candidatesByPos: Map<number, Set<string>> = new Map();
-      wordCharCandidates.set(w.logiNumber, candidatesByPos);
+      const wCands = wordCharCandidates.get(w.logiNumber);
+      if (!wCands) continue;
 
-      const dfs = (currId: string, charIdx: number) => {
-        if (charIdx === w.length) return; 
-        const currNode = nodeMap.get(currId)!;
-        const targetChar = w.text[charIdx];
-        const nextFixedId = w.fixedNodeIDs[charIdx + 1];
-
-        for (const nid of currNode.neighbors) {
-          if (used.has(nid)) continue;
-          if (nextFixedId && nid !== nextFixedId) continue;
-          const nb = nodeMap.get(nid)!;
-          if (!nb.isFixed || nb.currentChar === targetChar) {
-            if (!candidatesByPos.has(charIdx)) candidatesByPos.set(charIdx, new Set());
-            candidatesByPos.get(charIdx)!.add(nid);
-
-            if (!nodeCharUsage.has(nid)) nodeCharUsage.set(nid, new Map());
-            const charMap = nodeCharUsage.get(nid)!;
-            if (!charMap.has(targetChar)) charMap.set(targetChar, new Set());
-            charMap.get(targetChar)!.add(w.logiNumber);
-
-            used.add(nid);
-            dfs(nid, charIdx + 1);
-            used.delete(nid);
-          }
-        }
-      };
-      dfs(startId, fixedLen);
-    }
-
-    // メソッドA: 共有チャンスの取得
-    const getSharingOpportunities = (wNum: number, pos: number) => {
-      const opportunities = new Map<string, Set<number>>();
-      const candW = wordCharCandidates.get(wNum)?.get(pos);
-      if (!candW) return opportunities;
-
-      const wordW = solverWords.find(sw => sw.logiNumber === wNum)!;
-
-      for (const [vNum, vCands] of wordCharCandidates.entries()) {
-        if (vNum === wNum) continue;
-        const wordV = solverWords.find(sw => sw.logiNumber === vNum)!;
-        
-        for (const [vPos, candV] of vCands.entries()) {
-          if (wordW.text[pos] !== wordV.text[vPos]) continue;
-          // 両方の単語がそのマスに到達可能かチェック
-          const intersection = Array.from(candW).filter(id => candV.has(id));
-          for (const nid of intersection) {
-            if (!opportunities.has(nid)) opportunities.set(nid, new Set());
-            opportunities.get(nid)!.add(vNum);
-          }
+      // この単語における共有候補箇所のリストを収集
+      const sharingPositionsW: { pos: number, opps: Map<string, Set<string>> }[] = [];
+      for (let j = 1; j < w.text.length; j++) {
+        if (w.fixedNodeIDs[j + 1]) continue;
+        const opps = getSharingOpportunities(w.logiNumber, j);
+        if (opps.size > 0) {
+          sharingPositionsW.push({ pos: j, opps });
         }
       }
-      return opportunities;
-    };
 
-    // 2. 共有セル確定 (相互独占・相思相愛チェック)
-    for (const w of solverWords) {
-      if (w.isUsed) continue;
-      for (let i = 1; i < w.text.length; i++) {
-        if (w.fixedNodeIDs[i + 1]) continue;
+      // 1つの単語内に複数の共有候補箇所がある場合は保留
+      if (sharingPositionsW.length > 1) {
+        continue;
+      }
+      if (sharingPositionsW.length === 0) continue;
 
-        const oppsW = getSharingOpportunities(w.logiNumber, i);
-        // この単語にとって、共有できるマスが1箇所しかない場合
-        if (oppsW.size === 1) {
-          const [nid, partners] = Array.from(oppsW.entries())[0];
-          
-          // パートナー側にとっても、このマス以外に共有の選択肢がないか（浮気していないか）チェック
-          let allPartnersDecisive = true;
-          for (const pNum of partners) {
-            const pWord = solverWords.find(sw => sw.logiNumber === pNum)!;
-            let partnerHasOtherOption = false;
-            for (let j = 1; j < pWord.text.length; j++) {
-              if (pWord.text[j] === w.text[i]) {
-                const oppsP = getSharingOpportunities(pNum, j);
-                if (oppsP.size > 1) {
-                  partnerHasOtherOption = true;
-                  break;
-                }
-              }
-            }
-            if (partnerHasOtherOption) {
-              allPartnersDecisive = false;
+      const { pos: i, opps: oppsW } = sharingPositionsW[0];
+
+      // この位置の共有候補セルが1つだけの場合
+      if (oppsW.size === 1) {
+        const [nid, partnerSet] = Array.from(oppsW.entries())[0];
+        
+        // 単語内競合チェック
+        let hasSelfConflict = false;
+        for (let k = 1; k < w.text.length; k++) {
+          if (k === i) continue;
+          if (w.text[k] === w.text[i]) {
+            const otherPosCands = wCands.get(k);
+            if (otherPosCands && otherPosCands.has(nid)) {
+              hasSelfConflict = true;
               break;
             }
           }
+        }
+        if (hasSelfConflict) continue;
 
-          if (allPartnersDecisive) {
-            const node = nodeMap.get(nid)!;
-            log(`単語 [${w.logiNumber}] と相手単語群が文字 '${w.text[i]}' を共有できる唯一の場所 ${getExcelCoords(node)} を相互確定`);
-            fixNode(node, w.text[i]);
-            // アンカー（ワープ予約）を打つ
-            w.fixedNodeIDs[i + 1] = nid;
-            for (const pNum of partners) {
-               const pWord = solverWords.find(sw => sw.logiNumber === pNum)!;
-               for (let j = 1; j < pWord.text.length; j++) {
-                 if (pWord.text[j] === w.text[i]) {
-                   pWord.fixedNodeIDs[j + 1] = nid;
-                 }
-               }
-            }
-            await reportStep();
-            changed = true;
+        // パートナーの単語番号を抽出
+        const partnerNums = new Set<number>();
+        let hasFixedPartner = false;
+        for (const p of partnerSet) {
+          if (p === 'FIXED:0') {
+            hasFixedPartner = true;
+          } else {
+            partnerNums.add(parseInt(p.split(':')[0], 10));
           }
+        }
+
+        // パートナー側チェック
+        let allPartnersDecisive = true;
+        
+        // 確定済みセルとの共有の場合は、そのセル自体が既に確定しているので
+        // 「パートナー側が迷っている」という概念はないが、
+        // もし partnerSet に FIXED 以外も混ざっているなら、それらも decisive である必要がある。
+        
+        for (const pNum of partnerNums) {
+          const pWord = solverWords.find(sw => sw.logiNumber === pNum)!;
+          const pCands = wordCharCandidates.get(pNum);
+          
+          // パートナー単語における共有候補箇所のリスト
+          const sharingPositionsP: { pos: number, opps: Map<string, Set<string>> }[] = [];
+          for (let j = 1; j < pWord.text.length; j++) {
+            if (pWord.fixedNodeIDs[j + 1]) continue;
+            const opps = getSharingOpportunities(pNum, j);
+            if (opps.size > 0) {
+              sharingPositionsP.push({ pos: j, opps });
+            }
+          }
+
+          // パートナー側も共有候補箇所が複数ある場合は保留
+          if (sharingPositionsP.length > 1) {
+            allPartnersDecisive = false;
+            break;
+          }
+
+          let partnerHasOtherOption = false;
+          let partnerHasSelfConflict = false;
+
+          for (const { pos: j, opps: oppsP } of sharingPositionsP) {
+            if (pWord.text[j] === w.text[i]) {
+              if (oppsP.size > 1) {
+                partnerHasOtherOption = true;
+                break;
+              }
+              for (let k = 1; k < pWord.text.length; k++) {
+                if (k === j) continue;
+                if (pWord.text[k] === pWord.text[j]) {
+                  const otherPosCands = pCands?.get(k);
+                  if (otherPosCands && otherPosCands.has(nid)) {
+                    partnerHasSelfConflict = true;
+                    break;
+                  }
+                }
+              }
+              if (partnerHasSelfConflict) break;
+            }
+          }
+          if (partnerHasOtherOption || partnerHasSelfConflict) {
+            allPartnersDecisive = false;
+            break;
+          }
+        }
+
+        if (allPartnersDecisive) {
+          const node = nodeMap.get(nid)!;
+          const partnerDesc = hasFixedPartner ? '確定済みセル' : '相手単語群';
+          log(`単語 [${w.logiNumber}] と ${partnerDesc} が文字 '${w.text[i]}' を共有できる唯一の場所 ${getExcelCoords(node)} を相互確定 (単語内競合なし)`);
+          fixNode(node, w.text[i]);
+          // アンカーを打つ
+          w.fixedNodeIDs[i + 1] = nid;
+          for (const pStr of partnerSet) {
+             if (pStr === 'FIXED:0') continue;
+             const [pNumStr, pPosStr] = pStr.split(':');
+             const pNum = parseInt(pNumStr, 10);
+             const pPos = parseInt(pPosStr, 10);
+             const pWord = solverWords.find(sw => sw.logiNumber === pNum)!;
+             pWord.fixedNodeIDs[pPos + 1] = nid;
+          }
+          await reportStep();
+          changed = true;
         }
       }
     }
@@ -452,10 +546,40 @@ export async function solveZigzagAsync(
           const node = nodeMap.get(nid)!;
           return node.isFixed && node.currentChar === targetChar;
         });
+
         if (matchingFixedNodes.length === 1) {
           const targetId = matchingFixedNodes[0];
+
+          // ガード追加：この位置 (fixedLen + d - 1) において、他にも共有の可能性があるセルがないかチェック
+          const oppsAll = getSharingOpportunities(w.logiNumber, fixedLen + d - 1);
+          if (oppsAll.size > 1) {
+            // 他にも共有可能なセル（未使用単語との共有など）がある場合は保留
+            continue;
+          }
+
+          // ガード追加：この targetId が、w の他の未確定位置（同じ文字）にも到達可能かどうかをチェック
+          let hasSelfConflict = false;
+          for (let k = fixedLen + 1; k <= w.length; k++) {
+            if (k === fixedLen + d) continue; // 自分自身はスキップ
+            if (w.text[k - 1] === targetChar) {
+              // 距離 k - fixedLen で targetId に到達可能か？
+              const otherDist = k - fixedLen;
+              const otherCandidates = findNodesAtDistance(startId, otherDist, w);
+              if (otherCandidates.includes(targetId)) {
+                hasSelfConflict = true;
+                break;
+              }
+            }
+          }
+
+          if (hasSelfConflict) {
+            log(`単語 [${w.logiNumber}] の確定文字 '${targetChar}' (${getExcelCoords(nodeMap.get(targetId)!)}) への接続は、複数の位置で可能なため保留します。`);
+            continue; // 保留
+          }
+
           if (w.fixedNodeIDs[fixedLen + d] !== targetId) {
             w.fixedNodeIDs[fixedLen + d] = targetId;
+            log(`単語 [${w.logiNumber}] の ${fixedLen + d} 文字目 '${targetChar}' を確定済みセル ${getExcelCoords(nodeMap.get(targetId)!)} に接続`);
             dChanged = true;
             changed = true;
           }
@@ -493,11 +617,18 @@ export async function solveZigzagAsync(
   let totalChanged = true;
   while (totalChanged) {
     totalChanged = false;
+
+    // 候補情報の更新
+    collectWordCandidates();
+
     log("--- 論理推論フェーズ 開始 ---");
     let stable = false;
     while (!stable) {
       stable = true;
-      if (await executeLogicalLoop()) { stable = false; }
+      if (await executeLogicalLoop()) { 
+        stable = false; 
+        collectWordCandidates(); // 状態が変わったら更新
+      }
     }
     
     log("--- 確定文字との共有化 (Type 1) 開始 ---");
@@ -514,19 +645,22 @@ export async function solveZigzagAsync(
   }
 
   const finalCells = currentCells.map(row => row.map(c => ({ ...c })));
-  let complete = true;
+  let allCellsFilled = true;
   for (const node of nodeMap.values()) {
     const cell = finalCells[node.y][node.x];
-    if (node.isFixed) cell.answerChar = node.currentChar;
-    else complete = false;
-  }
-  for (const w of solverWords) {
-    if (getFixedLength(w) !== w.length) { complete = false; break; }
+    if (node.isFixed) {
+      cell.answerChar = node.currentChar;
+    } else {
+      allCellsFilled = false;
+    }
   }
 
+  // 盤面が全て埋まっていれば、内部的なパスの繋がりが不完全でも「解答完了」とみなす
+  const isComplete = allCellsFilled;
+
   return {
-    success: complete,
+    success: isComplete,
     solvedCells: finalCells,
-    message: complete ? '解答が完了しました！' : '論理的には解けません。総当たりしか手段がありません。'
+    message: isComplete ? '解答が完了しました！' : '論理的には解けません。総当たりしか手段がありません。'
   };
 }

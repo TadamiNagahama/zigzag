@@ -104,26 +104,27 @@ function App() {
   const [zoom, setZoom] = useState(1);
 
   // 変則モード用の共有マス計算ロジック
-  const irregularInfo = useMemo(() => {
-    if (puzzle.puzzleType !== '変則') return { sharedCells: {} as Record<string, number[]>, errors: [] as string[] };
+  // 変則モード用の共有マス計算ロジック
+  const calculateIrregularInfo = (p: PuzzleData) => {
+    if (p.puzzleType !== '変則') return { sharedCells: {} as Record<string, number[]>, errors: [] as string[] };
 
     const sharedCellsMap: Record<string, number[]> = {};
     const errors: string[] = [];
 
     // 使用されている番号を抽出
     const usedNumbers = new Set<number>();
-    puzzle.cells.forEach(row => row.forEach(cell => {
+    p.cells.forEach(row => row.forEach(cell => {
       if (cell.number !== null) usedNumbers.add(cell.number);
     }));
 
     // 経路探索（最大2つまで取得）
     const findAllPaths = (word: string, x: number, y: number, visited: Set<string>, currentPath: { x: number, y: number }[]): { x: number, y: number }[][] => {
-      if (x < 0 || x >= puzzle.width || y < 0 || y >= puzzle.height) return [];
+      if (x < 0 || x >= p.width || y < 0 || y >= p.height) return [];
       
-      const cell = puzzle.cells[y][x];
+      const cell = p.cells[y][x];
       const px = cell.mergedParent ? cell.mergedParent.x : x;
       const py = cell.mergedParent ? cell.mergedParent.y : y;
-      const parentCell = puzzle.cells[py][px];
+      const parentCell = p.cells[py][px];
 
       if (parentCell.type !== 'normal') return [];
       const currentChar = parentCell.char || parentCell.answerChar;
@@ -157,9 +158,9 @@ function App() {
         for (const [dx, dy] of neighbors) {
           const nx = gc.x + dx;
           const ny = gc.y + dy;
-          if (nx < 0 || nx >= puzzle.width || ny < 0 || ny >= puzzle.height) continue;
+          if (nx < 0 || nx >= p.width || ny < 0 || ny >= p.height) continue;
           
-          const nCell = puzzle.cells[ny][nx];
+          const nCell = p.cells[ny][nx];
           if (nCell.type !== 'normal') continue;
           const npx = nCell.mergedParent ? nCell.mergedParent.x : nx;
           const npy = nCell.mergedParent ? nCell.mergedParent.y : ny;
@@ -176,12 +177,12 @@ function App() {
 
     // どこまで辿れたかを確認（エラーメッセージ用）
     const getMaxDepth = (word: string, x: number, y: number, visited: Set<string>, depth: number): number => {
-      if (x < 0 || x >= puzzle.width || y < 0 || y >= puzzle.height) return depth;
+      if (x < 0 || x >= p.width || y < 0 || y >= p.height) return depth;
       
-      const cell = puzzle.cells[y][x];
+      const cell = p.cells[y][x];
       const px = cell.mergedParent ? cell.mergedParent.x : x;
       const py = cell.mergedParent ? cell.mergedParent.y : y;
-      const parentCell = puzzle.cells[py][px];
+      const parentCell = p.cells[py][px];
 
       if (parentCell.type !== 'normal') return depth;
       const currentChar = parentCell.char || parentCell.answerChar;
@@ -214,9 +215,9 @@ function App() {
         for (const [dx, dy] of neighbors) {
           const nx = gc.x + dx;
           const ny = gc.y + dy;
-          if (nx < 0 || nx >= puzzle.width || ny < 0 || ny >= puzzle.height) continue;
+          if (nx < 0 || nx >= p.width || ny < 0 || ny >= p.height) continue;
           
-          const nCell = puzzle.cells[ny][nx];
+          const nCell = p.cells[ny][nx];
           if (nCell.type !== 'normal') continue;
           const npx = nCell.mergedParent ? nCell.mergedParent.x : nx;
           const npy = nCell.mergedParent ? nCell.mergedParent.y : ny;
@@ -229,13 +230,13 @@ function App() {
     };
 
     for (const num of Array.from(usedNumbers).sort((a, b) => a - b)) {
-      const word = puzzle.wordList[num];
+      const word = p.wordList[num];
       if (!word || word.trim() === '') continue;
 
       let startPos: { x: number, y: number } | null = null;
-      for (let y = 0; y < puzzle.height; y++) {
-        for (let x = 0; x < puzzle.width; x++) {
-          if (puzzle.cells[y][x].number === num) {
+      for (let y = 0; y < p.height; y++) {
+        for (let x = 0; x < p.width; x++) {
+          if (p.cells[y][x].number === num) {
             startPos = { x, y };
             break;
           }
@@ -253,8 +254,8 @@ function App() {
         errors.push(`リスト${num}の単語は2つ以上のルートが存在します`);
       } else {
         // 一意な経路が見つかった場合のみ、共有情報を記録
-        paths[0].forEach(p => {
-          const k = `${p.x},${p.y}`;
+        paths[0].forEach(pCoord => {
+          const k = `${pCoord.x},${pCoord.y}`;
           if (!sharedCellsMap[k]) sharedCellsMap[k] = [];
           if (!sharedCellsMap[k].includes(num)) sharedCellsMap[k].push(num);
         });
@@ -270,7 +271,9 @@ function App() {
     });
 
     return { sharedCells: finalSharedCells, errors };
-  }, [puzzle]);
+  };
+
+  const irregularInfo = useMemo(() => calculateIrregularInfo(puzzle), [puzzle]);
   const [pendingResize, setPendingResize] = useState<{ h: number, w: number } | null>(null);
   const editingWordRef = useRef<number | null>(null);
 
@@ -1100,9 +1103,14 @@ function App() {
 
   const handleAutoSolve = () => {
     // 制限チェック
+    const isNormalType = puzzle.puzzleType === 'ノーマル' || puzzle.puzzleType === '通常';
     const hasShaded = puzzle.cells.some(row => row.some(c => c.isShaded));
-    const hasMerged = puzzle.cells.some(row => row.some(c => c.mergedSize || c.mergedParent));
-    if (puzzle.puzzleType !== 'ノーマル' || hasShaded || hasMerged) {
+    const hasMerged = puzzle.cells.some(row => row.some(c => 
+      c.mergedParent || (c.mergedSize && (c.mergedSize.width > 1 || c.mergedSize.height > 1))
+    ));
+
+    if (!isNormalType || hasShaded || hasMerged) {
+      console.log('AutoSolve restriction triggered:', { puzzleType: puzzle.puzzleType, hasShaded, hasMerged });
       setAlertMessage('自動解答は現在「ノーマル」かつ「網掛けなし」「結合なし」の問題にのみ対応しています。');
       return;
     }
@@ -1150,7 +1158,9 @@ function App() {
       }));
 
       if (result.success) {
-        setAlertMessage('🎉 自動解答が完了しました！');
+        // 解答完了後に完成チェックロジックを流用して最終確認を行う
+        const finalPuzzle = { ...puzzle, cells: result.solvedCells, updatedAt: Date.now() };
+        validateManuscript(finalPuzzle);
       } else {
         setAlertMessage(result.message);
       }
@@ -1162,7 +1172,8 @@ function App() {
     }
   };
 
-  const validateManuscript = () => {
+  const validateManuscript = (targetPuzzle: PuzzleData = puzzle) => {
+    const puzzle = targetPuzzle; // 引数で渡されたパズル（または現在の状態）をシャドウイング
     const errors: React.ReactNode[] = [];
 
     // 1. 盤面充填チェック
@@ -1197,7 +1208,8 @@ function App() {
 
     // 変則モードの場合、パス探索エラーを最初に追加
     if (puzzle.puzzleType === '変則') {
-      errors.push(...irregularInfo.errors);
+      const info = calculateIrregularInfo(puzzle);
+      errors.push(...info.errors);
     }
 
     // 2. リスト充填チェック
@@ -1893,7 +1905,7 @@ function App() {
                     <button
                       className="btn-orange"
                       style={{ flex: 1, padding: '10px 0', fontSize: '0.8rem', height: '42px' }}
-                      onClick={validateManuscript}
+                      onClick={() => validateManuscript()}
                     >
                       完成チェック
                     </button>
@@ -2257,7 +2269,7 @@ function App() {
                     <button
                       className="btn-orange"
                       style={{ flex: 1, padding: '8px 0', fontSize: '0.9rem', height: '38px' }}
-                      onClick={validateManuscript}
+                      onClick={() => validateManuscript()}
                     >
                       完成チェック
                     </button>

@@ -278,7 +278,7 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown,
       {/* トレース・ヘルプパネル (ドラッグ中のみ表示) */}
       {dragStart && appMode === 'answer' && (() => {
         const startCell = cells[dragStart.y][dragStart.x];
-        const popupNum = startCell.number || currentSolveNumber;
+        const popupNum = currentSolveNumber || startCell.number;
         const word = popupNum ? wordList[popupNum] : null;
         if (!word) return null;
 
