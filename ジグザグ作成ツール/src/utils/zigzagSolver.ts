@@ -96,18 +96,36 @@ export async function solveZigzagAsync(
 
   // 2. 隣接関係の構築
   for (const node of nodeMap.values()) {
+    const parentCell = cells[node.y][node.x];
+    const groupCells: { x: number, y: number }[] = [];
+
+    // 大マスの場合は全範囲をリストアップ、小マスの場合は自分自身のみ
+    if (parentCell.mergedSize) {
+      for (let dy = 0; dy < parentCell.mergedSize.height; dy++) {
+        for (let dx = 0; dx < parentCell.mergedSize.width; dx++) {
+          groupCells.push({ x: node.x + dx, y: node.y + dy });
+        }
+      }
+    } else {
+      groupCells.push({ x: node.x, y: node.y });
+    }
+
     const directions = [[0, -1], [0, 1], [-1, 0], [1, 0]];
-    for (const [dx, dy] of directions) {
-      const nx = node.x + dx;
-      const ny = node.y + dy;
-      if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-        const neighborCell = cells[ny][nx];
-        const targetX = neighborCell.mergedParent ? neighborCell.mergedParent.x : nx;
-        const targetY = neighborCell.mergedParent ? neighborCell.mergedParent.y : ny;
-        const neighborId = `${targetX},${targetY}`;
-        if (nodeMap.has(neighborId) && neighborId !== node.id) {
-          if (!node.neighbors.includes(neighborId)) {
-            node.neighbors.push(neighborId);
+    for (const gc of groupCells) {
+      for (const [dx, dy] of directions) {
+        const nx = gc.x + dx;
+        const ny = gc.y + dy;
+        if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+          const neighborCell = cells[ny][nx];
+          const targetX = neighborCell.mergedParent ? neighborCell.mergedParent.x : nx;
+          const targetY = neighborCell.mergedParent ? neighborCell.mergedParent.y : ny;
+          const neighborId = `${targetX},${targetY}`;
+
+          // 自分自身（同じ大マス内）でなく、まだ登録されていないノードなら追加
+          if (neighborId !== node.id && nodeMap.has(neighborId)) {
+            if (!node.neighbors.includes(neighborId)) {
+              node.neighbors.push(neighborId);
+            }
           }
         }
       }
@@ -687,6 +705,105 @@ export async function solveZigzagAsync(
     return Array.from(results);
   };
 
+  const solveBottleneckSharing = async (): Promise<boolean> => {
+    log("--- Phase: ボトルネック共有判定 ---");
+    let changed = false;
+
+    // nodeID -> { wordNumber -> Set<candidateChars> }
+    const nodeToMandatoryWords: Map<string, Map<number, Set<string>>> = new Map();
+
+    for (const w of solverWords) {
+      if (w.isUsed) continue;
+      const fixedLen = getFixedLength(w);
+      if (fixedLen === 0 || fixedLen === w.length) continue;
+
+      const startNodeId = w.fixedNodeIDs[fixedLen]!;
+      const remainingText = w.text.slice(fixedLen);
+      const usedInWord = getUsedNodes(w, fixedLen);
+      
+      const paths: string[][] = [];
+      const MAX_PATHS = 500;
+      let overflow = false;
+
+      const findPaths = (currId: string, charIdx: number, currentPath: string[]) => {
+        if (overflow) return;
+        if (charIdx === remainingText.length) {
+          paths.push([...currentPath]);
+          if (paths.length >= MAX_PATHS) overflow = true;
+          return;
+        }
+
+        const node = nodeMap.get(currId)!;
+        for (const neighborId of node.neighbors) {
+          if (usedInWord.has(neighborId)) continue;
+          const neighborNode = nodeMap.get(neighborId)!;
+          const targetChar = remainingText[charIdx];
+
+          if (neighborNode.isFixed && neighborNode.currentChar !== targetChar) continue;
+
+          usedInWord.add(neighborId);
+          currentPath.push(neighborId);
+          findPaths(neighborId, charIdx + 1, currentPath);
+          currentPath.pop();
+          usedInWord.delete(neighborId);
+        }
+      };
+
+      findPaths(startNodeId, 0, []);
+
+      if (paths.length === 0) continue; 
+      if (overflow) {
+        log(`単語 [${w.logiNumber}] の可能経路が多すぎるためボトルネック解析をスキップします`);
+        continue;
+      }
+
+      const bottleneckNodes = new Set(paths[0]);
+      for (let i = 1; i < paths.length; i++) {
+        const pathSet = new Set(paths[i]);
+        for (const nid of bottleneckNodes) {
+          if (!pathSet.has(nid)) bottleneckNodes.delete(nid);
+        }
+      }
+
+      for (const nid of bottleneckNodes) {
+        const charSet = new Set<string>();
+        for (const path of paths) {
+          const idx = path.indexOf(nid);
+          charSet.add(remainingText[idx]);
+        }
+        
+        if (!nodeToMandatoryWords.has(nid)) {
+          nodeToMandatoryWords.set(nid, new Map());
+        }
+        nodeToMandatoryWords.get(nid)!.set(w.logiNumber, charSet);
+      }
+    }
+
+    for (const [nodeId, wordMaps] of nodeToMandatoryWords.entries()) {
+      const node = nodeMap.get(nodeId)!;
+      if (node.isFixed) continue;
+
+      const sets = Array.from(wordMaps.values());
+      if (sets.length === 0) continue;
+
+      const intersection = new Set(sets[0]);
+      for (let i = 1; i < sets.length; i++) {
+        for (const c of Array.from(intersection)) {
+          if (!sets[i].has(c)) intersection.delete(c);
+        }
+      }
+
+      if (intersection.size === 1) {
+        const fixedChar = Array.from(intersection)[0];
+        log(`ノード ${getExcelCoords(node)} は複数の単語の必須通過点であり、共通文字 '${fixedChar}' で確定しました`);
+        fixNode(node, fixedChar);
+        await reportStep();
+        changed = true;
+      }
+    }
+    return changed;
+  };
+
   let totalChanged = true;
   while (totalChanged) {
     totalChanged = false;
@@ -700,7 +817,7 @@ export async function solveZigzagAsync(
       stable = true;
       if (await executeLogicalLoop()) { 
         stable = false; 
-        collectWordCandidates(); // 状態が変わったら更新
+        collectWordCandidates(); 
       }
     }
     
@@ -708,6 +825,12 @@ export async function solveZigzagAsync(
     if (await solveFixedSharing()) { 
       totalChanged = true;
       continue; 
+    }
+
+    log("--- ボトルネック共有化 (Phase 3) 開始 ---");
+    if (await solveBottleneckSharing()) {
+      totalChanged = true;
+      continue;
     }
 
     log("--- 未確定文字同士の共有化 (Type 2) 開始 ---");
