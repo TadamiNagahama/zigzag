@@ -15,7 +15,11 @@ interface SolverNode {
   neighbors: string[];
   reservedBy: Set<number>;
   reservedChars: Set<string>;
-  candidates: Set<string>;
+  candidates: Set<string>; // 既存の候補管理
+  
+  // 超モード用
+  numberCandidates?: Set<number>;
+  hiddenCorrectNumber?: number | null;
 }
 
 interface SolverWord {
@@ -55,17 +59,61 @@ export async function solveZigzagAsync(
   // 現在の状態をコピーして保持
   const currentCells = cells.map(row => row.map(c => ({ ...c })));
 
+  const isChoMode = puzzle.cells.some(row => row.some(c => c.isShaded));
+  if (isChoMode) {
+    log("超モードを検出しました。網掛けの下の数字を隠蔽して推論を開始します。");
+  }
+
+  const syncWordFixedNodes = () => {
+    for (const w of solverWords) {
+      const startNodeId = w.fixedNodeIDs[1];
+      if (startNodeId) {
+        const node = nodeMap.get(startNodeId);
+        if (node && node.logiNumber === null) {
+          node.logiNumber = w.logiNumber;
+          // 1文字目は確定文字として扱う
+          if (!node.isFixed) {
+            node.currentChar = w.text[0];
+            node.isFixed = true;
+          }
+        }
+      }
+      // 2文字目以降も、もし固定ノードIDがあれば文字を同期
+      for (let i = 1; i <= w.length; i++) {
+        const nid = w.fixedNodeIDs[i];
+        if (nid) {
+          const node = nodeMap.get(nid);
+          if (node && !node.isFixed) {
+            node.currentChar = w.text[i - 1];
+            node.isFixed = true;
+          }
+        }
+      }
+    }
+  };
+
   const reportStep = async () => {
+    syncWordFixedNodes();
     if (onStep) {
+      // メインのデータを壊さないよう、表示用のコピーを作成して隠蔽処理を行う
+      const displayCells = currentCells.map(row => row.map(c => ({ ...c })));
+      
       for (const node of nodeMap.values()) {
-        const cell = currentCells[node.y][node.x];
+        const cell = displayCells[node.y][node.x];
         if (node.isFixed) {
           cell.answerChar = node.currentChar;
         }
+        // 数字の同期 (表示用)
+        // 文字が判明している（isFixed）か、数字が特定されている（logiNumber）場合は数字を表示する
+        if (node.logiNumber !== null || node.isFixed) {
+          cell.number = node.logiNumber ?? puzzle.cells[node.y][node.x].number;
+        } else if (isChoMode && puzzle.cells[node.y][node.x].isShaded) {
+          cell.number = null; // 未確定の網掛けは表示上隠す
+        }
       }
-      await onStep(currentCells);
-      // アニメーションのために少し待機
-      await new Promise(resolve => setTimeout(resolve, 30));
+      await onStep(displayCells);
+      // 超モードの場合は推論過程を見せるため少し長めに待つ
+      await new Promise(resolve => setTimeout(resolve, isChoMode ? 150 : 30));
     }
   };
 
@@ -73,26 +121,34 @@ export async function solveZigzagAsync(
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const cell = cells[y][x];
+      if (cell.type === 'wall') continue;
+
+      // 結合マスの親でない場合はスキップ
       if (cell.mergedParent && (cell.mergedParent.x !== x || cell.mergedParent.y !== y)) {
         continue;
       }
-      
+
       const id = `${x},${y}`;
       const node: SolverNode = {
         id,
         x,
         y,
-        logiNumber: cell.number,
-        currentChar: cell.char || cell.answerChar || '',
-        isFixed: !!(cell.char || cell.answerChar),
+        isFixed: cell.char !== '' || (cell.number !== null && !cell.isShaded),
+        currentChar: cell.char,
+        logiNumber: cell.isShaded ? null : cell.number,
         neighbors: [],
         reservedBy: new Set(),
         reservedChars: new Set(),
-        candidates: new Set()
+        candidates: new Set(),
+        numberCandidates: cell.isShaded ? new Set() : undefined,
+        hiddenCorrectNumber: cell.isShaded ? cell.number : undefined,
       };
       nodeMap.set(id, node);
     }
   }
+
+  // 最初の表示 (超モードなら網掛けの数字が消えた状態)
+  await reportStep();
 
   // 2. 隣接関係の構築
   for (const node of nodeMap.values()) {
@@ -804,9 +860,95 @@ export async function solveZigzagAsync(
     return changed;
   };
 
+  /**
+   * 超モード用の地理的数字確定ロジック
+   * 番号の読書順（左上から右下）ルールに基づき、網掛けの下の数字を特定する
+   */
+  const solveChoNumberPlacement = async (): Promise<boolean> => {
+    if (!isChoMode) return false;
+    log("--- Phase: 超問題・地理的数字特定 ---");
+    let changed = false;
+
+    // 1. 全マスのうち、数字が入る可能性があるマスをスキャン順にリストアップ
+    const candidateNodes: SolverNode[] = [];
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const id = `${x},${y}`;
+        const node = nodeMap.get(id);
+        if (!node) continue;
+        
+        const cell = cells[y][x];
+        if ((cell.number !== null && !cell.isShaded) || cell.isShaded) {
+          candidateNodes.push(node);
+        }
+      }
+    }
+
+    // 2. 確定している数字の「隙間」を解析
+    const allWordNumbers = Object.keys(wordList).map(n => parseInt(n, 10)).sort((a, b) => a - b);
+    if (allWordNumbers.length === 0) return false;
+
+    const posToNumber = new Array(candidateNodes.length).fill(null);
+    candidateNodes.forEach((node, idx) => {
+      if (node.logiNumber !== null) {
+        posToNumber[idx] = node.logiNumber;
+      }
+    });
+
+    let lastFoundIdx = -1;
+    let lastFoundNum = 0;
+
+    for (let i = 0; i <= candidateNodes.length; i++) {
+      const isEnd = i === candidateNodes.length;
+      const currentNum = isEnd ? allWordNumbers[allWordNumbers.length - 1] + 1 : posToNumber[i];
+
+      if (currentNum !== null) {
+        const gapSize = i - lastFoundIdx - 1;
+        const missingNumsCount = currentNum - lastFoundNum - 1;
+
+        if (gapSize > 0 && missingNumsCount > 0) {
+          if (gapSize === missingNumsCount) {
+            for (let k = 1; k <= gapSize; k++) {
+              const targetNode = candidateNodes[lastFoundIdx + k];
+              const targetNum = lastFoundNum + k;
+              if (targetNode.logiNumber === null) {
+                log(`地理的順序により、${getExcelCoords(targetNode)} は数字 ${targetNum} で確定しました`);
+                targetNode.logiNumber = targetNum;
+                const word = solverWords.find(sw => sw.logiNumber === targetNum);
+                if (word) {
+                  word.fixedNodeIDs[1] = targetNode.id;
+                  if (!targetNode.currentChar) {
+                    targetNode.currentChar = word.text[0];
+                    targetNode.isFixed = true;
+                  }
+                }
+                changed = true;
+              }
+            }
+          }
+        }
+        lastFoundIdx = i;
+        lastFoundNum = currentNum;
+      }
+    }
+
+    if (changed) await reportStep();
+    return changed;
+  };
+
+  // メインループ: 論理確定と共有判定を繰り返す
   let totalChanged = true;
   while (totalChanged) {
     totalChanged = false;
+
+    // 超モードの場合、数字の特定を試みる
+    if (isChoMode) {
+      if (await solveChoNumberPlacement()) {
+        totalChanged = true;
+        collectWordCandidates();
+        continue;
+      }
+    }
 
     // 候補情報の更新
     collectWordCandidates();
