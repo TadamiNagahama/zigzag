@@ -26,7 +26,7 @@ interface GridProps {
   currentSolveNumber?: number | null;
 }
 
-export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown, onCellRightClick, onDragSelection, onDragPath, cellSize = 40, appMode = 'edit', focusedCell = null, composingText = '', shadingColor = '#f0fdf4', wordList = {}, boardFontWeight = 'normal', boardFontFamily = '', isNumbersHidden = false, isIrregularNumbersDisplay = false, sharedCells = {}, highlightedDrawnCells = [], completedWords = new Set(), currentSolveNumber = null }) => {
+export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown, onCellRightClick, onDragSelection, onDragPath, cellSize = 40, appMode = 'edit', focusedCell = null, composingText = '', shadingColor = '#dbeafe', wordList = {}, boardFontWeight = 'normal', boardFontFamily = '', isNumbersHidden = false, isIrregularNumbersDisplay = false, sharedCells = {}, highlightedDrawnCells = [], completedWords = new Set(), currentSolveNumber = null }) => {
   const [dragStart, setDragStart] = useState<{ x: number, y: number } | null>(null);
   const [dragPath, setDragPath] = useState<{ x: number, y: number }[]>([]);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });

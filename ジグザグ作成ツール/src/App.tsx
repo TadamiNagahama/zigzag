@@ -788,6 +788,10 @@ function App() {
   };
 
   const handleLoadConfirm = (p: PuzzleData) => {
+    // 古いデフォルト色（緑）を新しいデフォルト色（青）に自動変換
+    if (p.shadingColor === '#f0fdf4') {
+      p.shadingColor = '#dbeafe';
+    }
     const applyLoad = () => {
       const normalized = normalizePuzzle(p);
       reset(normalized);
@@ -828,6 +832,7 @@ function App() {
   const handleNewBoard = (h: number, w: number) => {
     const applyNew = () => {
       createNewBoard(h, w);
+      setAppMode('edit');
       setShowSizeDialog(false);
       fitToScreen();
       setConfirmAction(null);

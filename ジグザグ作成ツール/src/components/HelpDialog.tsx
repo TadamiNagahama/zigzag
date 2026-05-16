@@ -456,7 +456,7 @@ export const HelpDialog: React.FC<HelpDialogProps> = ({ onClose }) => {
           color: #1e40af;
         }
         .help-tip {
-          background-color: #f0fdf4;
+          background-color: #dbeafe;
           border-left: 4px solid #22c55e;
           padding: 12px 16px;
           border-radius: 0 4px 4px 0;

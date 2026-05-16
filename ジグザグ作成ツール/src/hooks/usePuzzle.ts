@@ -25,7 +25,7 @@ const createEmptyPuzzle = (w: number, h: number): PuzzleData => {
     isWList: false,
     isWListStar: false,
     wordList2: [''],
-    shadingColor: '#f0fdf4', // デフォルトは薄い緑
+    shadingColor: '#dbeafe', // デフォルトは薄い青
     boardFontWeight: 'normal',
     boardFontFamily: '',
     updatedAt: Date.now()
@@ -121,7 +121,12 @@ const getInitialPuzzle = (w: number, h: number): PuzzleData => {
   const savedData = localStorage.getItem('zigzag_autosave_data');
   if (savedData) {
     try {
-      return JSON.parse(savedData);
+      const data = JSON.parse(savedData);
+      // 古いデフォルト色（緑）を新しいデフォルト色（青）に自動変換
+      if (data.shadingColor === '#f0fdf4') {
+        data.shadingColor = '#dbeafe';
+      }
+      return data;
     } catch (e) {
       console.error('Failed to parse autosave data:', e);
     }
