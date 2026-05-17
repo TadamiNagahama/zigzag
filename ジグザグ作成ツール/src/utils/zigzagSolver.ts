@@ -56,13 +56,19 @@ export async function solveZigzagAsync(
   const nodeMap: Map<string, SolverNode> = new Map();
   const solverWords: SolverWord[] = [];
 
-  // 現在の状態をコピーして保持
-  const currentCells = cells.map(row => row.map(c => ({ ...c })));
-
   const isChoMode = puzzle.cells.some(row => row.some(c => c.isShaded));
   if (isChoMode) {
     log("超モードを検出しました。網掛けの下の数字を隠蔽して推論を開始します。");
   }
+
+  // 現在の状態をコピーして保持
+  // 超モード（網掛け）かつ未開示の場合、原稿の数字と文字を消去してカンニングを防止する
+  const currentCells = cells.map(row => row.map(c => {
+    if (isChoMode && c.isShaded && !c.isRevealed) {
+      return { ...c, number: null, char: '' };
+    }
+    return { ...c };
+  }));
 
   const syncWordFixedNodes = () => {
     for (const w of solverWords) {
@@ -71,13 +77,12 @@ export async function solveZigzagAsync(
         const node = nodeMap.get(startNodeId);
         if (node && node.logiNumber === null) {
           node.logiNumber = w.logiNumber;
-          log(`[1文字目確定] ${w.logiNumber}番の開始位置を ${getExcelCoords(node)} と特定しました（単語の1文字目が配置されたため）`);
+          log(`[数字確定] ${w.logiNumber}番の開始位置が ${getExcelCoords(node)} に特定されました`);
           // 1文字目は確定文字として扱う
           if (!node.isFixed) {
             node.currentChar = w.text[0];
             node.isFixed = true;
           }
-          //changed = true;
         }
       }
       // 2文字目以降も、もし固定ノードIDがあれば文字を同期
@@ -164,6 +169,9 @@ export async function solveZigzagAsync(
         numberCandidates: isActuallyShaded ? new Set() : undefined,
         hiddenCorrectNumber: isActuallyShaded ? cell.number : undefined,
       };
+      if (node.logiNumber !== null) {
+        log(`[初期配置確認] ${node.logiNumber}番の数字が ${getExcelCoords(node)} に配置されています`);
+      }
       nodeMap.set(id, node);
     }
   }
@@ -224,6 +232,7 @@ export async function solveZigzagAsync(
     const startNode = Array.from(nodeMap.values()).find(n => n.logiNumber === logiNumber);
     if (startNode) {
       word.fixedNodeIDs[1] = startNode.id;
+      log(`[初期配置確認] ${logiNumber}番の開始位置は ${getExcelCoords(startNode)} です`);
       if (!startNode.currentChar) {
         startNode.currentChar = text[0];
         startNode.isFixed = true;
@@ -257,10 +266,10 @@ export async function solveZigzagAsync(
     node.isFixed = true;
   };
 
-  const getExcelCoords = (node: SolverNode) => {
+  function getExcelCoords(node: SolverNode) {
     const col = String.fromCharCode(65 + node.x);
     return `${col}${node.y + 1}`;
-  };
+  }
 
   await reportStep();
 
@@ -685,15 +694,25 @@ export async function solveZigzagAsync(
     }
 
     // 3. セル視点での一意性チェック (全候補が一致)
-    for (const [nid, charMap] of nodeCharUsage.entries()) {
-      const node = nodeMap.get(nid)!;
-      if (node.isFixed) continue;
-      if (charMap.size === 1) {
-        const [char, words] = Array.from(charMap.entries())[0];
-        log(`セル ${getExcelCoords(node)} は文字 '${char}' のみが配置可能 (全候補が一致: リスト ${Array.from(words).sort((a, b) => a - b).join(', ')})`);
-        fixNode(node, char);
-        await reportStep();
-        changed = true;
+    // 超モードの場合、すべての単語の開始位置（数字）が確定するまでは、この「裸のシングル」判定を行わない
+    let shouldSkipSingleCheck = false;
+    if (isChoMode) {
+      if (solverWords.some(w => w.fixedNodeIDs[1] === null)) {
+        shouldSkipSingleCheck = true;
+      }
+    }
+
+    if (!shouldSkipSingleCheck) {
+      for (const [nid, charMap] of nodeCharUsage.entries()) {
+        const node = nodeMap.get(nid)!;
+        if (node.isFixed) continue;
+        if (charMap.size === 1) {
+          const [char, words] = Array.from(charMap.entries())[0];
+          log(`セル ${getExcelCoords(node)} は文字 '${char}' のみが配置可能 (全候補が一致: リスト ${Array.from(words).sort((a, b) => a - b).join(', ')})`);
+          fixNode(node, char);
+          await reportStep();
+          changed = true;
+        }
       }
     }
     return changed;
@@ -957,6 +976,202 @@ export async function solveZigzagAsync(
     return changed;
   };
 
+  /**
+   * 超モード用：共有化シミュレーションによる網掛け開始位置の特定
+   */
+  const solveChoNumberBySharing = async (): Promise<boolean> => {
+    if (!isChoMode) return false;
+    let changed = false;
+
+    // 1. 未確定の単語
+    const targetWords = solverWords.filter(w => w.fixedNodeIDs[1] === null);
+    if (targetWords.length === 0) return false;
+
+    // 2. 読書順ノードの抽出（事前絞り込み用）
+    const scanNodes: SolverNode[] = [];
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const cell = cells[y][x];
+        if ((cell.number !== null && !cell.isShaded) || cell.isShaded) {
+          const node = nodeMap.get(`${x},${y}`);
+          if (node) scanNodes.push(node);
+        }
+      }
+    }
+
+    // アンカー（確定数字）の特定と仮想アンカーの追加
+    const allWordNumbers = Object.keys(wordList).map(n => parseInt(n, 10)).sort((a, b) => a - b);
+    if (allWordNumbers.length === 0) return false;
+
+    interface Anchor { scanIdx: number; num: number; }
+    const anchors: Anchor[] = [];
+    anchors.push({ scanIdx: -1, num: allWordNumbers[0] - 1 });
+
+    for (let i = 0; i < scanNodes.length; i++) {
+      if (scanNodes[i].logiNumber !== null) {
+        anchors.push({ scanIdx: i, num: scanNodes[i].logiNumber! });
+      }
+    }
+    anchors.push({ scanIdx: scanNodes.length, num: allWordNumbers[allWordNumbers.length - 1] + 1 });
+
+    // 各数字が入りうるマスの事前絞り込み
+    const allowedStartNodesForWord = new Map<number, SolverNode[]>();
+    for (const w of targetWords) {
+      allowedStartNodesForWord.set(w.logiNumber, []);
+    }
+
+    for (let i = 0; i < anchors.length - 1; i++) {
+      const a1 = anchors[i];
+      const a2 = anchors[i+1];
+
+      const M = a2.scanIdx - a1.scanIdx - 1; // 区間内の網掛けマス数
+      const N = a2.num - a1.num - 1;         // 区間に入るべき未確定数字の数
+
+      if (N <= 0 || M < N) continue;
+
+      const S = M - N; // 余裕度
+
+      for (let k = 1; k <= N; k++) {
+        const targetNum = a1.num + k;
+        if (allowedStartNodesForWord.has(targetNum)) {
+          const allowedNodes = allowedStartNodesForWord.get(targetNum)!;
+          // 左詰め(k-1)から右詰め(k-1+S)までのマスが候補
+          for (let offset = 0; offset <= S; offset++) {
+            const nodeIdx = a1.scanIdx + 1 + (k - 1) + offset;
+            if (nodeIdx >= 0 && nodeIdx < scanNodes.length) {
+              const node = scanNodes[nodeIdx];
+              if (node.logiNumber === null) {
+                allowedNodes.push(node);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    for (const w of targetWords) {
+      const validStartNodes: { startId: string, sharedPosMap: Map<number, Set<string>> }[] = [];
+      const allowedCandidates = allowedStartNodesForWord.get(w.logiNumber) || [];
+      if (allowedCandidates.length === 0) continue;
+
+      for (const startNode of allowedCandidates) {
+        let hasValidPath = false;
+        const sharedPosMap = new Map<number, Set<string>>();
+        const currentPath: { nid: string, char: string, isShared: boolean, charIdx: number }[] = [];
+        const used = new Set<string>();
+
+        const dfs = (currId: string, charIdx: number) => {
+          if (charIdx === w.length) {
+            const sharedPoints = currentPath.filter(p => p.isShared);
+            if (sharedPoints.length > 0) {
+              hasValidPath = true;
+              for (const p of sharedPoints) {
+                if (!sharedPosMap.has(p.charIdx)) sharedPosMap.set(p.charIdx, new Set());
+                sharedPosMap.get(p.charIdx)!.add(p.nid);
+              }
+            }
+            return;
+          }
+
+          const currNode = nodeMap.get(currId)!;
+          const targetChar = w.text[charIdx];
+
+          for (const nid of currNode.neighbors) {
+            if (used.has(nid)) continue;
+            const nb = nodeMap.get(nid)!;
+
+            if (nb.isFixed && nb.currentChar !== targetChar) continue;
+
+            let isShared = false;
+            if (nb.isFixed && nb.currentChar === targetChar) {
+              isShared = true;
+            } else if (!nb.isFixed) {
+              const charMap = nodeCharUsage.get(nid);
+              if (charMap && charMap.has(targetChar)) {
+                const otherWords = Array.from(charMap.get(targetChar)!).filter(num => num !== w.logiNumber);
+                const hasFixedStartWord = otherWords.some(num => {
+                  const otherW = solverWords.find(sw => sw.logiNumber === num);
+                  return otherW && otherW.fixedNodeIDs[1] !== null;
+                });
+                if (hasFixedStartWord) isShared = true;
+              }
+            }
+
+            used.add(nid);
+            currentPath.push({ nid, char: targetChar, isShared, charIdx });
+            dfs(nid, charIdx + 1);
+            currentPath.pop();
+            used.delete(nid);
+          }
+        };
+
+        let isStartShared = false;
+        if (startNode.isFixed && startNode.currentChar === w.text[0]) {
+          isStartShared = true;
+        } else if (!startNode.isFixed) {
+          const charMap = nodeCharUsage.get(startNode.id);
+          if (charMap && charMap.has(w.text[0])) {
+            const otherWords = Array.from(charMap.get(w.text[0])!).filter(num => num !== w.logiNumber);
+            const hasFixedStartWord = otherWords.some(num => {
+              const otherW = solverWords.find(sw => sw.logiNumber === num);
+              return otherW && otherW.fixedNodeIDs[1] !== null;
+            });
+            if (hasFixedStartWord) isStartShared = true;
+          }
+        }
+
+        used.add(startNode.id);
+        currentPath.push({ nid: startNode.id, char: w.text[0], isShared: isStartShared, charIdx: 0 });
+        dfs(startNode.id, 1);
+        used.delete(startNode.id);
+
+        if (hasValidPath) {
+          validStartNodes.push({ startId: startNode.id, sharedPosMap });
+        }
+      }
+
+      // 条件A: 共有化が成立する候補マスが1つだけ
+      if (validStartNodes.length === 1) {
+        const { startId, sharedPosMap } = validStartNodes[0];
+
+        // 条件B: 共有文字の入るマスが1つに限定されているか
+        let uniqueSharedTargetId: string | null = null;
+        let uniqueSharedCharIdx: number = -1;
+
+        for (const [charIdx, targetIds] of sharedPosMap.entries()) {
+          if (targetIds.size === 1) {
+            uniqueSharedTargetId = Array.from(targetIds)[0];
+            uniqueSharedCharIdx = charIdx;
+            break;
+          }
+        }
+
+        if (uniqueSharedTargetId !== null) {
+          const startNode = nodeMap.get(startId)!;
+          const sharedNode = nodeMap.get(uniqueSharedTargetId)!;
+          
+          log(`[共有化開始位置推論] 単語 [${w.logiNumber}] の開始位置を ${getExcelCoords(startNode)} と特定 (共有文字 '${w.text[uniqueSharedCharIdx]}' @ ${getExcelCoords(sharedNode)})`);
+          
+          startNode.logiNumber = w.logiNumber;
+          w.fixedNodeIDs[1] = startId;
+          if (!startNode.currentChar) {
+            fixNode(startNode, w.text[0]);
+          }
+
+          if (!sharedNode.isFixed) {
+            fixNode(sharedNode, w.text[uniqueSharedCharIdx]);
+          }
+          
+          changed = true;
+          break; // 他の単語に影響を与えるため一度ブレイクして再計算
+        }
+      }
+    }
+
+    if (changed) await reportStep();
+    return changed;
+  };
+
   // メインループ: 論理確定と共有判定を繰り返す
   let totalChanged = true;
   while (totalChanged) {
@@ -965,6 +1180,11 @@ export async function solveZigzagAsync(
     // 超モードの場合、数字の特定を試みる
     if (isChoMode) {
       if (await solveChoNumberPlacement()) {
+        totalChanged = true;
+        collectWordCandidates();
+        continue;
+      }
+      if (await solveChoNumberBySharing()) {
         totalChanged = true;
         collectWordCandidates();
         continue;
@@ -1003,14 +1223,18 @@ export async function solveZigzagAsync(
     }
   }
 
-  const finalCells = currentCells.map((row, y) => row.map((c, x) => ({ ...cells[y][x] })));
+  // 最終盤面の組み立て：余計な体裁（原稿データの再コピー）を排除し、推論結果のみを反映させる
+  // const finalCells = currentCells.map((row, y) => row.map((c, x) => ({ ...cells[y][x] })));
+  const finalCells = currentCells.map((row) => row.map((c) => ({ ...c })));
+  
   let allCellsFilled = true;
   for (const node of nodeMap.values()) {
     const cell = finalCells[node.y][node.x];
 
-    // 網掛けマスの表示制御
+    // 網掛けマスの表示制御：文字確定(isFixed)での解除は「余計なこと」なのでコメントアウト
     if (isChoMode && cell.isShaded) {
-      if (node.isFixed || node.logiNumber !== null || cells[node.y][node.x].isRevealed) {
+      // if (node.isFixed || node.logiNumber !== null || cells[node.y][node.x].isRevealed) {
+      if (node.logiNumber !== null || cells[node.y][node.x].isRevealed) {
         cell.isRevealed = true;
       } else {
         cell.isRevealed = false;
