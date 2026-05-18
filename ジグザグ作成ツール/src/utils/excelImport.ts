@@ -203,27 +203,39 @@ export function convertManualImportToPuzzle(
     for (let r = 0; r < height; r++) {
       for (let c = 0; c < width; c++) {
         const cell = listCells[r][c];
-        if (cell && cell.text !== '') {
-          const match = cell.text.trim().match(/^(\d+)[\.\s]*(.*)$/);
+        if (!cell || !cell.text) continue;
+
+        // エディタからのコピペ時に混入しやすいBOM等を除去し、改行で複数行に分割する
+        const cleanText = cell.text.replace(/[\uFEFF\u200B]/g, '');
+        const lines = cleanText.split(/\r?\n/).filter(l => l.trim() !== '');
+
+        for (const line of lines) {
+          // 先頭に数字（括弧付きも許容）があるかチェックする
+          // 例: "1. リンゴ", "[1] リンゴ", "1 リンゴ", "① リンゴ"(現状は半角のみ)
+          const match = line.trim().match(/^[\[【\(（]?\s*(\d+)\s*[\]】\)）]?[\.\s\t:：]*(.*)$/);
           if (match) {
             const num = Number(match[1]);
             const rest = match[2].trim();
+            
             if (rest.length > 0) {
               newWordList[num] = rest;
             } else {
-              const rightCell1 = c + 1 < width ? listCells[r][c+1] : null;
-              const rightCell2 = c + 2 < width ? listCells[r][c+2] : null;
-              const downCell1 = r + 1 < height ? listCells[r+1][c] : null;
-              const downCell2 = r + 2 < height ? listCells[r+2][c] : null;
-              
-              if (rightCell1 && rightCell1.text.trim() !== '') {
-                 newWordList[num] = rightCell1.text.trim();
-              } else if (rightCell2 && rightCell2.text.trim() !== '') {
-                 newWordList[num] = rightCell2.text.trim();
-              } else if (downCell1 && downCell1.text.trim() !== '') {
-                 newWordList[num] = downCell1.text.trim();
-              } else if (downCell2 && downCell2.text.trim() !== '') {
-                 newWordList[num] = downCell2.text.trim();
+              // 番号と単語が別のセルに分かれている標準的なケースの場合
+              if (lines.length === 1) {
+                const rightCell1 = c + 1 < width ? listCells[r][c+1] : null;
+                const rightCell2 = c + 2 < width ? listCells[r][c+2] : null;
+                const downCell1 = r + 1 < height ? listCells[r+1][c] : null;
+                const downCell2 = r + 2 < height ? listCells[r+2][c] : null;
+                
+                if (rightCell1 && rightCell1.text.trim() !== '') {
+                   newWordList[num] = rightCell1.text.trim();
+                } else if (rightCell2 && rightCell2.text.trim() !== '') {
+                   newWordList[num] = rightCell2.text.trim();
+                } else if (downCell1 && downCell1.text.trim() !== '') {
+                   newWordList[num] = downCell1.text.trim();
+                } else if (downCell2 && downCell2.text.trim() !== '') {
+                   newWordList[num] = downCell2.text.trim();
+                }
               }
             }
           }

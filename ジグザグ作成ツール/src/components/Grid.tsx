@@ -153,11 +153,13 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown,
                 height: cellSize * spanH,
                 backgroundColor: cell.type === 'wall' 
                   ? 'var(--wall-color)' 
-                  : ((cell.answerKey && (appMode === 'shade' || appMode === 'answer' || appMode === 'edit'))
-                      ? '#dcfce7' 
-                      : ((cell.isShaded && (appMode === 'shade' || appMode === 'answer' || appMode === 'edit'))
-                          ? shadingColor 
-                          : (cell.number !== null && completedWords.has(cell.number) ? '#e2e8f0' : 'white'))),
+                  : (cell.isDifferent
+                      ? '#ffb3b3'
+                      : ((cell.answerKey && (appMode === 'shade' || appMode === 'answer' || appMode === 'edit'))
+                          ? '#dcfce7' 
+                          : ((cell.isShaded && (appMode === 'shade' || appMode === 'answer' || appMode === 'edit'))
+                              ? shadingColor 
+                              : (cell.number !== null && completedWords.has(cell.number) ? '#e2e8f0' : 'white')))),
                 backgroundImage: (cell.isShaded && (appMode === 'shade' || appMode === 'answer' || appMode === 'edit')) 
                   ? 'repeating-linear-gradient(45deg, transparent, transparent 2px, rgba(34, 197, 94, 0.3) 2px, rgba(34, 197, 94, 0.3) 4px)' 
                   : 'none',

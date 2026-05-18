@@ -94,7 +94,7 @@ function App() {
     reorderWordList2,
   } = usePuzzle(17, 17);
 
-  const [editMode, setEditMode] = useState<EditMode>('number');
+  const [editMode] = useState<EditMode>('number');
   const [draggedItemIndex, setDraggedItemIndex] = useState<number | null>(null);
   const [draggedWord2Index, setDraggedWord2Index] = useState<number | null>(null);
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
@@ -1067,7 +1067,7 @@ function App() {
     }
   }, [appMode, focusedCell]);
 
-  const runAutoSolve = async (resetBoard: boolean) => {
+  const runAutoSolve = async (resetBoard: boolean, findAlternative: boolean = false, firstSolutionCells?: Cell[][]) => {
     setShowSolveChoice(false);
     const originalCells = puzzle.cells; // 原稿の完全退避
 
@@ -1082,6 +1082,18 @@ function App() {
         })))
       };
       setPuzzle(startPuzzle);
+    } else if (findAlternative && firstSolutionCells) {
+      // 別解探索時は初期盤面として最初の解の「数字」等の状態を保つが、文字はそのままか消すか？
+      // solveZigzagAsyncは内部で初期盤面（文字なし）から解き直すため、ここでは元の文字を消した盤面を渡す
+      startPuzzle = {
+        ...puzzle,
+        cells: puzzle.cells.map(row => row.map(c => ({ 
+          ...c, 
+          answerChar: '', 
+          isRevealed: !c.isShaded
+        })))
+      };
+      // ※ setPuzzle(startPuzzle) すると画面が一瞬消えるので、別解探索時は画面を更新しない
     } else {
       // 途中からの場合、既に入力がある網掛けマスを表示状態にする
       startPuzzle = {
@@ -1095,12 +1107,14 @@ function App() {
     }
 
     setSolverLogs([]);
-    setShowSolverLogs(true);
+    // setShowSolverLogs(true); // 本番公開時はログダイアログを非表示にする
     setIsSolving(true);
     setAlertMessage(null);
 
     // 途中経過の表示用
     const onStep = async (stepCells: Cell[][]) => {
+      // 別解探索時は「最初からやり直している」経過を見せず、裏で高速処理する
+      if (findAlternative) return;
       // updatedAt を更新しないことで、解答途中のデータがオートセーブされるのを防ぐ
       setPuzzle(prev => ({ ...prev, cells: stepCells }));
     };
@@ -1108,7 +1122,7 @@ function App() {
     try {
       const result = await solveZigzagAsync(startPuzzle, onStep, (msg) => {
         setSolverLogs(prev => [...prev, msg]);
-      });
+      }, findAlternative, firstSolutionCells);
 
       if (result.success) {
         // 成功：結果を履歴に保存し、反映する
@@ -1118,9 +1132,30 @@ function App() {
           cells: result.solvedCells,
           updatedAt: Date.now()
         }));
-        validateManuscript(solvedPuzzle);
+        const shouldSuppressSuccess = result.isBacktracked || findAlternative;
+        validateManuscript(solvedPuzzle, shouldSuppressSuccess);
+
+        if (findAlternative) {
+          if (result.isAlternativeFound) {
+            setAlertMessage('別解を見つけました。さきほどの解と異なるマスに色を付けてあります。');
+          } else if (result.isUnique) {
+            setAlertMessage('総当たりが終了しました。唯一解でした。');
+          }
+        } else if (result.isBacktracked) {
+          // バックトラックで解を見つけた場合、別解を探すか尋ねる
+          setConfirmAction({
+            message: '総当たりで解を見つけました。\n他に解があるかもしれません。探しますか？\n（「はい」の場合は別解を探し、「いいえ」の場合は現在の盤面で終了します）',
+            onConfirm: () => {
+              setConfirmAction(null);
+              runAutoSolve(false, true, result.solvedCells);
+            },
+            onCancel: () => setConfirmAction(null),
+            confirmText: 'はい。別解を探す',
+            cancelText: 'いいえ。解析を終了する'
+          } as any);
+        }
       } else {
-        // 失敗：結果をそのまま反映（zigzagSolver側で原稿保護と隠蔽が適用済み）
+        // 失敗：結果をそのまま反映
         pushPuzzle(prev => ({
           ...prev,
           cells: result.solvedCells,
@@ -1218,7 +1253,7 @@ function App() {
     }
   };
 
-  const validateManuscript = (targetPuzzle: PuzzleData = puzzle) => {
+  const validateManuscript = (targetPuzzle: PuzzleData = puzzle, suppressSuccessMessage: boolean = false) => {
     const puzzle = targetPuzzle; // 引数で渡されたパズル（または現在の状態）をシャドウイング
     const errors: React.ReactNode[] = [];
 
@@ -1569,7 +1604,9 @@ function App() {
             </div>
       );
     } else {
-      setAlertMessage('バッチリです！すべての文字が正しく配置され、経路も完全に繋がっています。');
+      if (!suppressSuccessMessage) {
+        setAlertMessage('バッチリです！すべての文字が正しく配置され、経路も完全に繋がっています。');
+      }
     }
   };
 
@@ -2636,6 +2673,8 @@ function App() {
               onConfirm={confirmAction.onConfirm}
               onCancel={(confirmAction as any).onCancel || (() => setConfirmAction(null))}
               isDestructive={(confirmAction as any).isDestructive}
+              confirmText={(confirmAction as any).confirmText || 'はい'}
+              cancelText={(confirmAction as any).cancelText || 'キャンセル'}
             />
           )}
 

@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.1.1';
+export const APP_VERSION = '1.2.0';
 export type CellType = 'normal' | 'wall';
 
 export interface CellStyle {
@@ -20,6 +20,7 @@ export interface Cell {
   style: CellStyle;
   mergedParent?: { x: number, y: number }; // 結合されている場合の親マスの座標
   mergedSize?: { width: number, height: number }; // 結合サイズ (親マスのみが保持する)
+  isDifferent?: boolean; // 別解探索時に、最初の解と異なる文字が入っているマス
 }
 
 export type PuzzleType = 'ノーマル' | '通常' | 'Wリスト' | 'Wリスト★' | 'ナンバーレス' | '部分ナンバーレス' | 'ウルトラ' | '変則' | '矢印';
