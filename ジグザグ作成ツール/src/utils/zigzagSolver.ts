@@ -50,7 +50,11 @@ export async function solveZigzagAsync(
   onStep: SolverStepCallback,
   onLog?: SolverLogCallback,
   findAlternative: boolean = false,
-  firstSolutionCells?: Cell[][]
+  firstSolutionCells?: Cell[][],
+  onConfirm?: (msg: string) => Promise<boolean>,
+  checkCancelled?: () => boolean,
+  onBacktrackStart?: () => void,
+  onBacktrackEnd?: () => void
 ): Promise<SolveResult> {
   const log = (msg: string) => {
     if (onLog) onLog(msg);
@@ -174,9 +178,6 @@ export async function solveZigzagAsync(
         numberCandidates: isActuallyShaded ? new Set() : undefined,
         hiddenCorrectNumber: isActuallyShaded ? cell.number : undefined,
       };
-      if (node.logiNumber !== null) {
-        log(`[初期配置確認] ${node.logiNumber}番の数字が ${getExcelCoords(node)} に配置されています`);
-      }
       nodeMap.set(id, node);
     }
   }
@@ -237,7 +238,7 @@ export async function solveZigzagAsync(
     const startNode = Array.from(nodeMap.values()).find(n => n.logiNumber === logiNumber);
     if (startNode) {
       word.fixedNodeIDs[1] = startNode.id;
-      log(`[初期配置確認] ${logiNumber}番の開始位置は ${getExcelCoords(startNode)} です`);
+      // 初期配置確認のログを削除しました
       if (!startNode.currentChar) {
         startNode.currentChar = text[0];
         startNode.isFixed = true;
@@ -1326,7 +1327,283 @@ export async function solveZigzagAsync(
     return score - bestPathSharingBonus;
   };
 
-  const solveByBacktracking = (): boolean => {
+  interface GroupPattern {
+    assignments: Map<number, { nid: string, char: string }[]>; // wordLogiNumber -> path
+  }
+
+  const findGroupPatterns = async (
+    groupWordNums: number[],
+    wordPaths: Map<number, {nid: string, char: string}[][]>,
+    checkCancelled?: () => boolean
+  ): Promise<GroupPattern[]> => {
+    const patterns: GroupPattern[] = [];
+    const nWords = groupWordNums.length;
+
+    let iterations = 0;
+    const maxLocalIterations = 100000;
+
+    const backtrackGroup = async (wIdx: number, currentAssignments: Map<number, {nid: string, char: string}[]>) => {
+      iterations++;
+      if (iterations > maxLocalIterations) {
+        throw new Error("local_limit_exceeded");
+      }
+
+      if (iterations % 2000 === 0) {
+        if (checkCancelled && checkCancelled()) {
+          throw new Error("cancelled");
+        }
+        await new Promise(r => setTimeout(r, 0));
+      }
+
+      if (wIdx === nWords) {
+        patterns.push({
+          assignments: new Map(currentAssignments)
+        });
+        if (patterns.length > 500) {
+          throw new Error("too_many_patterns");
+        }
+        return;
+      }
+
+      const wNum = groupWordNums[wIdx];
+      const paths = wordPaths.get(wNum)!;
+
+      for (let pIdx = 0; pIdx < paths.length; pIdx++) {
+        const path = paths[pIdx];
+        let canPlace = true;
+
+        const usedThisTime = new Set<string>();
+        for (const step of path) {
+          const node = nodeMap.get(step.nid)!;
+          if (node.isFixed && node.currentChar !== step.char) {
+            canPlace = false;
+            break;
+          }
+          if (usedThisTime.has(step.nid)) {
+            canPlace = false;
+            break;
+          }
+          usedThisTime.add(step.nid);
+        }
+
+        if (!canPlace) continue;
+
+        const snap = createSnapshot();
+        const word = solverWords.find(sw => sw.logiNumber === wNum)!;
+        const fixedLen = getFixedLength(word);
+
+        for (let i = 0; i < path.length; i++) {
+          const step = path[i];
+          const node = nodeMap.get(step.nid)!;
+          fixNode(node, step.char);
+          word.fixedNodeIDs[fixedLen + i + 1] = step.nid;
+          if (fixedLen === 0 && i === 0) {
+            node.logiNumber = wNum;
+          }
+        }
+        word.isUsed = true;
+        currentAssignments.set(wNum, path);
+
+        await backtrackGroup(wIdx + 1, currentAssignments);
+
+        currentAssignments.delete(wNum);
+        restoreSnapshot(snap);
+      }
+    };
+
+    const initialSnap = createSnapshot();
+    await backtrackGroup(0, new Map());
+    restoreSnapshot(initialSnap);
+    return patterns;
+  };
+
+  const solveWithGroups = async (): Promise<boolean> => {
+    const remainingWords = solverWords.filter(w => !w.isUsed);
+    if (remainingWords.length === 0) return true;
+
+    log(`[GroupSolve] グループ総当たりを開始します... (対象単語数: ${remainingWords.length})`);
+    
+    const allowedChoStarts = getChoAllowedStartNodes();
+    const wordPaths = new Map<number, {nid: string, char: string}[][]>();
+    for (const w of remainingWords) {
+      const fixedLen = getFixedLength(w);
+      let paths: {nid: string, char: string}[][] = [];
+      if (fixedLen === 0) {
+        const overrideNodes = allowedChoStarts.get(w.logiNumber) || [];
+        paths = getAllValidPathsForBacktrack(w, overrideNodes);
+      } else {
+        paths = getAllValidPathsForBacktrack(w);
+      }
+      if (paths.length === 0) {
+        log(`[GroupSolve] 単語 [${w.logiNumber}] の可能経路がありません。矛盾です。`);
+        return false;
+      }
+      wordPaths.set(w.logiNumber, paths);
+    }
+
+    const adj: Map<number, Set<number>> = new Map();
+    for (const w of remainingWords) {
+      adj.set(w.logiNumber, new Set());
+    }
+
+    const nodeToWords: Map<string, number[]> = new Map();
+    for (const w of remainingWords) {
+      const paths = wordPaths.get(w.logiNumber)!;
+      const nodesUsed = new Set<string>();
+      for (const path of paths) {
+        for (const step of path) {
+          nodesUsed.add(step.nid);
+        }
+      }
+      for (const nid of nodesUsed) {
+        if (!nodeToWords.has(nid)) {
+          nodeToWords.set(nid, []);
+        }
+        nodeToWords.get(nid)!.push(w.logiNumber);
+      }
+    }
+
+    for (const [nid, words] of nodeToWords.entries()) {
+      for (let i = 0; i < words.length; i++) {
+        for (let j = i + 1; j < words.length; j++) {
+          adj.get(words[i])!.add(words[j]);
+          adj.get(words[j])!.add(words[i]);
+        }
+      }
+    }
+
+    const visitedWords = new Set<number>();
+    const groups: number[][] = [];
+    for (const w of remainingWords) {
+      if (visitedWords.has(w.logiNumber)) continue;
+      const group: number[] = [];
+      const queue: number[] = [w.logiNumber];
+      visitedWords.add(w.logiNumber);
+      while (queue.length > 0) {
+        const curr = queue.shift()!;
+        group.push(curr);
+        for (const neighbor of adj.get(curr)!) {
+          if (!visitedWords.has(neighbor)) {
+            visitedWords.add(neighbor);
+            queue.push(neighbor);
+          }
+        }
+      }
+      groups.push(group);
+    }
+
+    log(`[GroupSolve] グループ抽出完了。グループ数: ${groups.length}`);
+    groups.forEach((g, idx) => {
+      log(`[GroupSolve] グループ #${idx + 1}: 単語リスト [${g.join(", ")}]`);
+    });
+
+    const groupPatternsList: GroupPattern[][] = [];
+    for (let gIdx = 0; gIdx < groups.length; gIdx++) {
+      const group = groups[gIdx];
+      
+      if (checkCancelled && checkCancelled()) {
+        throw new Error("cancelled");
+      }
+
+      log(`[GroupSolve] グループ #${gIdx + 1} のローカル総当たり中...`);
+      const pats = await findGroupPatterns(group, wordPaths, checkCancelled);
+      if (pats.length === 0) {
+        log(`[GroupSolve] グループ #${gIdx + 1} に有効な配置パターンがありません。矛盾です。`);
+        return false;
+      }
+      log(`[GroupSolve] グループ #${gIdx + 1} パターン数: ${pats.length}`);
+      groupPatternsList.push(pats);
+    }
+
+    let totalSolutions = 1;
+    for (const pats of groupPatternsList) {
+      totalSolutions *= pats.length;
+    }
+
+    log(`[GroupSolve] グローバル統合完了。総解数: ${totalSolutions}`);
+
+    if (totalSolutions === 0) {
+      return false;
+    }
+
+    if (findAlternative && firstSolutionCells) {
+      let foundAlt = false;
+      const currentComb: GroupPattern[] = [];
+
+      const searchComb = (gIdx: number): boolean => {
+        if (gIdx === groups.length) {
+          const snap = createSnapshot();
+          applyCombination(currentComb);
+          
+          let isDifferent = false;
+          for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+              const node = nodeMap.get(`${x},${y}`);
+              const firstChar = firstSolutionCells[y][x].answerChar || '';
+              const currChar = node ? (node.isFixed ? node.currentChar : '') : '';
+              if (firstChar || currChar) {
+                if (firstChar !== currChar) {
+                  isDifferent = true;
+                  break;
+                }
+              }
+            }
+            if (isDifferent) break;
+          }
+
+          if (isDifferent) {
+            foundAlt = true;
+            return true;
+          }
+          restoreSnapshot(snap);
+          return false;
+        }
+
+        const pats = groupPatternsList[gIdx];
+        for (const pat of pats) {
+          currentComb.push(pat);
+          if (searchComb(gIdx + 1)) return true;
+          currentComb.pop();
+        }
+        return false;
+      };
+
+      searchComb(0);
+      if (foundAlt) {
+        log("[GroupSolve] 別解を検出しました。");
+        return true;
+      } else {
+        log("[GroupSolve] 別解は見つかりませんでした（唯一解です）。");
+        return false;
+      }
+    } else {
+      const firstComb = groupPatternsList.map(pats => pats[0]);
+      applyCombination(firstComb);
+      log("[GroupSolve] 解答の適用に成功しました。");
+      return true;
+    }
+  };
+
+  const applyCombination = (comb: GroupPattern[]) => {
+    for (const pat of comb) {
+      for (const [wNum, path] of pat.assignments.entries()) {
+        const word = solverWords.find(sw => sw.logiNumber === wNum)!;
+        const fixedLen = getFixedLength(word);
+        for (let i = 0; i < path.length; i++) {
+          const step = path[i];
+          const node = nodeMap.get(step.nid)!;
+          fixNode(node, step.char);
+          word.fixedNodeIDs[fixedLen + i + 1] = step.nid;
+          if (fixedLen === 0 && i === 0) {
+            node.logiNumber = wNum;
+          }
+        }
+        word.isUsed = true;
+      }
+    }
+  };
+
+  const solveByBacktracking = async (): Promise<boolean> => {
     const remainingWords = solverWords.filter(w => !w.isUsed);
     if (remainingWords.length === 0) return true;
 
@@ -1365,12 +1642,47 @@ export async function solveZigzagAsync(
 
     log(`[Backtrack] 仮置き総当たり（バックトラッキング）を開始します... (対象単語数: ${sortedWords.length})`);
     
+    log(`[Backtrack] --- バックトラック探索順データ一覧（スコア順） ---`);
+    sortedWords.forEach((w, idx) => {
+      const paths = wordPaths.get(w.logiNumber) || [];
+      const score = wordScores.get(w.logiNumber) || 0;
+      log(`[Backtrack] ${idx + 1}. 単語 [${w.logiNumber}] "${w.text}" (${w.length}文字) - 候補パス数: ${paths.length}, スコア: ${score}`);
+    });
+    log(`[Backtrack] ---------------------------------------------`);
+    
     let iterations = 0;
-    const maxIterations = 50000;
+    const maxIterations = 5000000;
+    let shownLimitWarning = false;
 
-    const backtrack = (wordIdx: number): boolean => {
+    if (onConfirm) {
+      const isConfirmed = await onConfirm("総当たりをやります。時間がかかりますが、イイですか？");
+      if (!isConfirmed) {
+        log(`[Backtrack] キャンセルされました。`);
+        return false;
+      }
+    } else {
+      if (!window.confirm("総当たりをやります。時間がかかりますが、イイですか？")) {
+        log(`[Backtrack] キャンセルされました。`);
+        return false;
+      }
+    }
+
+    const backtrack = async (wordIdx: number): Promise<boolean> => {
       iterations++;
-      if (iterations > maxIterations) return false;
+      
+      if (iterations > maxIterations) {
+        log(`[Backtrack] [警告] 試行回数が上限（${maxIterations}回）に達したため、バックトラッキングを終了します。`);
+        return false;
+      }
+
+      if (iterations % 5000 === 0) {
+        log(`[Backtrack] 探索中... 現在 ${iterations} 回目の試行を行っています（現在の探索深度: ${wordIdx}/${sortedWords.length}）`);
+        if (checkCancelled && checkCancelled()) {
+          log(`[Backtrack] キャンセルされました。`);
+          throw new Error("cancelled");
+        }
+        await new Promise(r => setTimeout(r, 0));
+      }
 
       if (wordIdx === sortedWords.length) {
         if (findAlternative && firstSolutionCells) {
@@ -1380,7 +1692,6 @@ export async function solveZigzagAsync(
               const node = nodeMap.get(`${x},${y}`);
               const firstChar = firstSolutionCells[y][x].answerChar || '';
               const currChar = node ? (node.isFixed ? node.currentChar : '') : '';
-              // 網掛けマス等で文字が入る場所だけ比較
               if (firstChar || currChar) {
                 if (firstChar !== currChar) {
                   isDifferent = true;
@@ -1391,9 +1702,9 @@ export async function solveZigzagAsync(
             if (isDifferent) break;
           }
           if (!isDifferent) {
-            return false; // 最初の解と同じなのでスキップして次を探す
+            return false;
           } else {
-            return true; // 別解を見つけた！
+            return true;
           }
         }
         return true;
@@ -1402,7 +1713,8 @@ export async function solveZigzagAsync(
       const w = sortedWords[wordIdx];
       const paths = wordPaths.get(w.logiNumber)!;
 
-      for (const path of paths) {
+      for (let pIdx = 0; pIdx < paths.length; pIdx++) {
+        const path = paths[pIdx];
         let canPlace = true;
         const fixedLen = getFixedLength(w);
         const usedThisTime = new Set<string>();
@@ -1422,6 +1734,17 @@ export async function solveZigzagAsync(
         }
         if (!canPlace) continue;
 
+        if (iterations <= 500) {
+          const pathCoords = path.map(step => {
+            const node = nodeMap.get(step.nid)!;
+            return `${step.char}(${getExcelCoords(node)})`;
+          }).join("->");
+          log(`[Backtrack] [試行 ${iterations}/深度 ${wordIdx}] 単語 [${w.logiNumber}] "${w.text}" をパス #${pIdx + 1} に仮置き: ${pathCoords}`);
+        } else if (!shownLimitWarning) {
+          shownLimitWarning = true;
+          log(`[Backtrack] ※ 試行回数が 500 回を超えたため、フリーズ防止のためにこれ以降の詳細な仮置き・バックトラックログは省略します。`);
+        }
+
         const snap = createSnapshot();
 
         for (let i = 0; i < path.length; i++) {
@@ -1436,7 +1759,11 @@ export async function solveZigzagAsync(
         }
         w.isUsed = true;
 
-        if (backtrack(wordIdx + 1)) return true;
+        if (await backtrack(wordIdx + 1)) return true;
+
+        if (iterations <= 500) {
+          log(`[Backtrack] [試行 ${iterations}/深度 ${wordIdx}] 単語 [${w.logiNumber}] "${w.text}" の仮置きを解除（戻る）`);
+        }
 
         restoreSnapshot(snap);
       }
@@ -1445,7 +1772,7 @@ export async function solveZigzagAsync(
     };
 
     const initialSnap = createSnapshot();
-    const success = backtrack(0);
+    const success = await backtrack(0);
 
     if (success) {
       if (findAlternative) {
@@ -1524,7 +1851,22 @@ export async function solveZigzagAsync(
   const remainingCount = solverWords.filter(w => !w.isUsed).length;
   if (remainingCount > 0 || findAlternative) {
     isBacktracked = true;
-    const backtrackSuccess = solveByBacktracking();
+    if (onBacktrackStart) onBacktrackStart();
+    
+    let backtrackSuccess = false;
+    try {
+      backtrackSuccess = await solveWithGroups();
+    } catch (e: any) {
+      if (e.message === "cancelled") {
+        log("[Solver] ユーザーによって解答が中止されました。");
+        backtrackSuccess = false;
+      } else {
+        log(`[GroupSolve] グループ総当たり中にエラーまたは上限超過が発生したため、従来のフル総当たりにフォールバックします。理由: ${e.message}`);
+        backtrackSuccess = await solveByBacktracking();
+      }
+    }
+    
+    if (onBacktrackEnd) onBacktrackEnd();
     
     if (findAlternative) {
       if (backtrackSuccess) {

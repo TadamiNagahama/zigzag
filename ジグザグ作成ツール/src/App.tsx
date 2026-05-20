@@ -23,7 +23,7 @@ import { SolveChoiceDialog } from './components/SolveChoiceDialog'
 import type { ManualImportConfig } from './utils/excelImport'
 import { auth, dbFirestore, googleProvider } from './models/firebase'
 import { signInWithPopup, signOut, onAuthStateChanged, type User } from 'firebase/auth'
-import { collection, addDoc, getDocs, query, where, deleteDoc, doc, updateDoc } from 'firebase/firestore'
+import { collection, addDoc, getDocs, query, where, deleteDoc, doc, updateDoc, onSnapshot } from 'firebase/firestore'
 import { type PuzzleData, type PrintOptions, type Cell, APP_VERSION } from './models/types'
 import { Settings, ZoomIn, ZoomOut, Maximize, Plus, Printer, Grid3X3 } from 'lucide-react'
 import './App.css'
@@ -328,9 +328,19 @@ function App() {
   const [solveCandidateIndex, setSolveCandidateIndex] = useState(0);
 
   const [isSolving, setIsSolving] = useState(false);
+  const [isBacktracking, setIsBacktracking] = useState(false);
+  const isCancelledRef = useRef(false);
+
+  const handleCancelSolve = () => {
+    isCancelledRef.current = true;
+    setIsBacktracking(false);
+  };
   const [showSolveChoice, setShowSolveChoice] = useState(false);
   const [solverLogs, setSolverLogs] = useState<string[]>([]);
   const [showSolverLogs, setShowSolverLogs] = useState(false);
+  const [systemLogEnabled, setSystemLogEnabled] = useState(() => {
+    return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  });
 
   // クラウド自動保存の設定（デフォルトOFF）
   const [cloudAutoSave, setCloudAutoSave] = useState(() => {
@@ -579,6 +589,38 @@ function App() {
       toggleIrregularNumbersDisplay();
     }
   }, [appMode, puzzle.isIrregularNumbersDisplay, toggleIrregularNumbersDisplay]);
+
+  // Firestore の system/settings からログ表示フラグを取得
+  useEffect(() => {
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    if (isLocalhost) {
+      setSystemLogEnabled(true);
+      return;
+    }
+
+    const unsub = onSnapshot(doc(dbFirestore, 'system', 'settings'), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const globalShow = !!data.showSolverLogs;
+        const adminEmails = (Array.isArray(data.adminEmails) ? data.adminEmails : []).map((e: string) => e.toLowerCase());
+        const adminUids = Array.isArray(data.adminUids) ? data.adminUids : [];
+
+        // ログインユーザーが管理者リストに含まれているかチェック
+        const isUserAdmin = user && (
+          (user.email && adminEmails.includes(user.email.toLowerCase())) ||
+          adminUids.includes(user.uid)
+        );
+
+        setSystemLogEnabled(globalShow && !!isUserAdmin);
+      } else {
+        setSystemLogEnabled(false);
+      }
+    }, (err) => {
+      console.warn("System settings fetch error:", err);
+      setSystemLogEnabled(false);
+    });
+    return () => unsub();
+  }, [user]);
 
   // クラウドへの1分毎の自動保存処理
   useEffect(() => {
@@ -1107,7 +1149,9 @@ function App() {
     }
 
     setSolverLogs([]);
-    // setShowSolverLogs(true); // 本番公開時はログダイアログを非表示にする
+    if (systemLogEnabled) {
+      setShowSolverLogs(true);
+    }
     setIsSolving(true);
     setAlertMessage(null);
 
@@ -1119,10 +1163,41 @@ function App() {
       setPuzzle(prev => ({ ...prev, cells: stepCells }));
     };
 
+    isCancelledRef.current = false;
+    setIsBacktracking(false);
+
     try {
-      const result = await solveZigzagAsync(startPuzzle, onStep, (msg) => {
-        setSolverLogs(prev => [...prev, msg]);
-      }, findAlternative, firstSolutionCells);
+      const confirmAsync = (msg: string): Promise<boolean> => {
+        return new Promise((resolve) => {
+          setConfirmAction({
+            message: msg,
+            onConfirm: () => {
+              setConfirmAction(null);
+              resolve(true);
+            },
+            onCancel: () => {
+              setConfirmAction(null);
+              resolve(false);
+            },
+            confirmText: 'はい',
+            cancelText: 'いいえ'
+          } as any);
+        });
+      };
+
+      const result = await solveZigzagAsync(
+        startPuzzle,
+        onStep,
+        (msg) => {
+          setSolverLogs(prev => [...prev, msg]);
+        },
+        findAlternative,
+        firstSolutionCells,
+        confirmAsync,
+        () => isCancelledRef.current,
+        () => setIsBacktracking(true),
+        () => setIsBacktracking(false)
+      );
 
       if (result.success) {
         // 成功：結果を履歴に保存し、反映する
@@ -1170,6 +1245,7 @@ function App() {
       setAlertMessage(`エラーが発生しました: ${error.message}`);
     } finally {
       setIsSolving(false);
+      setIsBacktracking(false);
     }
   };
 
@@ -2676,6 +2752,30 @@ function App() {
               confirmText={(confirmAction as any).confirmText || 'はい'}
               cancelText={(confirmAction as any).cancelText || 'キャンセル'}
             />
+          )}
+
+          {isBacktracking && (
+            <div className="modal-overlay" style={{ zIndex: 4000 }}>
+              <div className="modal-content glass card" style={{ width: '400px', textAlign: 'center', padding: '32px' }}>
+                <h3 style={{ color: 'var(--text-color)', marginBottom: '16px' }}>自動解答中</h3>
+                <div style={{ marginBottom: '24px', lineHeight: '1.6', fontSize: '0.95rem' }}>
+                  総当たりを実行しています。時間がかかる場合があります。
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                  <button 
+                    className="btn-primary" 
+                    onClick={handleCancelSolve}
+                    style={{ 
+                      minWidth: '120px', 
+                      backgroundColor: '#ef4444', 
+                      borderColor: '#ef4444' 
+                    }}
+                  >
+                    中止する
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
 
 
