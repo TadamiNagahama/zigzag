@@ -1497,12 +1497,26 @@ export async function solveZigzagAsync(
     for (const w of remainingWords) {
       const paths = wordPaths.get(w.logiNumber)!;
       const keyUsed = new Set<string>();
+      
+      // 候補パスが通るマスと文字を追加
       for (const path of paths) {
         for (const step of path) {
           const key = `${step.nid}:${step.char}`;
           keyUsed.add(key);
         }
       }
+
+      // 確定済みの接頭辞マスと文字も追加（確定文字との共有も考慮するため）
+      const fixedLen = getFixedLength(w);
+      for (let i = 1; i <= fixedLen; i++) {
+        const nid = w.fixedNodeIDs[i];
+        if (nid) {
+          const char = w.text[i - 1];
+          const key = `${nid}:${char}`;
+          keyUsed.add(key);
+        }
+      }
+
       for (const key of keyUsed) {
         if (!nodeCharToWords.has(key)) {
           nodeCharToWords.set(key, []);
@@ -1554,6 +1568,11 @@ export async function solveZigzagAsync(
       }
 
       log(`[GroupSolve] グループ #${gIdx + 1} のローカル総当たり中...`);
+      group.forEach(wNum => {
+        const paths = wordPaths.get(wNum) || [];
+        log(`[GroupSolve]   単語 [${wNum}] の候補パス数: ${paths.length}`);
+      });
+
       const pats = await findGroupPatterns(group, wordPaths, checkCancelled);
       if (pats.length === 0) {
         log(`[GroupSolve] グループ #${gIdx + 1} に有効な配置パターンがありません。矛盾です。`);
