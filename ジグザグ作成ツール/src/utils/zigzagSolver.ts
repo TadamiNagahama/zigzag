@@ -1334,6 +1334,7 @@ export async function solveZigzagAsync(
   const findGroupPatterns = async (
     groupWordNums: number[],
     wordPaths: Map<number, {nid: string, char: string}[][]>,
+    groupSharing: Map<number, Map<number, Set<string>>>,
     checkCancelled?: () => boolean
   ): Promise<GroupPattern[]> => {
     const patterns: GroupPattern[] = [];
@@ -1430,6 +1431,77 @@ export async function solveZigzagAsync(
             break;
           }
           usedThisTime.add(step.nid);
+        }
+
+        if (!canPlace) continue;
+
+        // グループ内共有文字マス一致チェック (同じ共有文字は必ず同じマスを使用する)
+        const wordSharing = groupSharing.get(wNum);
+        if (wordSharing) {
+          for (const [otherWNum, sharedChars] of wordSharing.entries()) {
+            if (currentAssignments.has(otherWNum)) {
+              const otherPath = currentAssignments.get(otherWNum)!;
+              const otherWord = solverWords.find(sw => sw.logiNumber === otherWNum)!;
+              const otherFixedLen = getFixedLength(otherWord);
+
+              const otherCellsByChar = new Map<string, Set<string>>();
+              for (const step of otherPath) {
+                if (!otherCellsByChar.has(step.char)) {
+                  otherCellsByChar.set(step.char, new Set());
+                }
+                otherCellsByChar.get(step.char)!.add(step.nid);
+              }
+              for (let i = 1; i <= otherFixedLen; i++) {
+                const nid = otherWord.fixedNodeIDs[i];
+                if (nid) {
+                  const char = otherWord.text[i - 1];
+                  if (!otherCellsByChar.has(char)) {
+                    otherCellsByChar.set(char, new Set());
+                  }
+                  otherCellsByChar.get(char)!.add(nid);
+                }
+              }
+
+              const selfWord = solverWords.find(sw => sw.logiNumber === wNum)!;
+              const selfFixedLen = getFixedLength(selfWord);
+              const selfCellsByChar = new Map<string, Set<string>>();
+              for (const step of path) {
+                if (!selfCellsByChar.has(step.char)) {
+                  selfCellsByChar.set(step.char, new Set());
+                }
+                selfCellsByChar.get(step.char)!.add(step.nid);
+              }
+              for (let i = 1; i <= selfFixedLen; i++) {
+                const nid = selfWord.fixedNodeIDs[i];
+                if (nid) {
+                  const char = selfWord.text[i - 1];
+                  if (!selfCellsByChar.has(char)) {
+                    selfCellsByChar.set(char, new Set());
+                  }
+                  selfCellsByChar.get(char)!.add(nid);
+                }
+              }
+
+              for (const char of sharedChars) {
+                const otherNids = otherCellsByChar.get(char);
+                const selfNids = selfCellsByChar.get(char);
+                if (otherNids && selfNids) {
+                  let hasCommonCell = false;
+                  for (const nid of selfNids) {
+                    if (otherNids.has(nid)) {
+                      hasCommonCell = true;
+                      break;
+                    }
+                  }
+                  if (!hasCommonCell) {
+                    canPlace = false;
+                    break;
+                  }
+                }
+              }
+            }
+            if (!canPlace) break;
+          }
         }
 
         if (!canPlace) continue;
@@ -1567,13 +1639,47 @@ export async function solveZigzagAsync(
         throw new Error("cancelled");
       }
 
+      // グループ内の単語間で、どの文字を共有すべきかのペアリストを構築
+      // キー: wNum -> Map<otherWNum, Set<char>>
+      const groupSharing: Map<number, Map<number, Set<string>>> = new Map();
+      for (const wNum of group) {
+        groupSharing.set(wNum, new Map());
+      }
+
+      for (const [key, words] of nodeCharToWords.entries()) {
+        const lastColonIdx = key.lastIndexOf(":");
+        if (lastColonIdx === -1) continue;
+        const char = key.substring(lastColonIdx + 1);
+        
+        // このキーに属する単語のうち、現在のグループに含まれるものだけを抽出
+        const groupWords = words.filter(w => group.includes(w));
+        if (groupWords.length > 1) {
+          for (let i = 0; i < groupWords.length; i++) {
+            for (let j = i + 1; j < groupWords.length; j++) {
+              const w1 = groupWords[i];
+              const w2 = groupWords[j];
+              
+              if (!groupSharing.get(w1)!.has(w2)) {
+                groupSharing.get(w1)!.set(w2, new Set());
+              }
+              groupSharing.get(w1)!.get(w2)!.add(char);
+
+              if (!groupSharing.get(w2)!.has(w1)) {
+                groupSharing.get(w2)!.set(w1, new Set());
+              }
+              groupSharing.get(w2)!.get(w1)!.add(char);
+            }
+          }
+        }
+      }
+
       log(`[GroupSolve] グループ #${gIdx + 1} のローカル総当たり中...`);
       group.forEach(wNum => {
         const paths = wordPaths.get(wNum) || [];
         log(`[GroupSolve]   単語 [${wNum}] の候補パス数: ${paths.length}`);
       });
 
-      const pats = await findGroupPatterns(group, wordPaths, checkCancelled);
+      const pats = await findGroupPatterns(group, wordPaths, groupSharing, checkCancelled);
       if (pats.length === 0) {
         log(`[GroupSolve] グループ #${gIdx + 1} に有効な配置パターンがありません。矛盾です。`);
         return false;
