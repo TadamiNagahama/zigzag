@@ -1343,6 +1343,51 @@ export async function solveZigzagAsync(
     let iterations = 0;
     const maxLocalIterations = 1000000;
 
+    // 各単語の各候補パスについて、文字ごとに使用するセルの集合を事前計算してキャッシュする
+    const pathCharCellsCache: Map<number, Map<string, Set<string>>[]> = new Map();
+
+    for (const wNum of groupWordNums) {
+      const paths = wordPaths.get(wNum)!;
+      const selfWord = solverWords.find(sw => sw.logiNumber === wNum)!;
+      const selfFixedLen = getFixedLength(selfWord);
+
+      // 固定部分の文字とマスのマップを事前構築
+      const fixedCells: Map<string, Set<string>> = new Map();
+      for (let i = 1; i <= selfFixedLen; i++) {
+        const nid = selfWord.fixedNodeIDs[i];
+        if (nid) {
+          const char = selfWord.text[i - 1];
+          if (!fixedCells.has(char)) {
+            fixedCells.set(char, new Set());
+          }
+          fixedCells.get(char)!.add(nid);
+        }
+      }
+
+      const pathsCharCellsMaps: Map<string, Set<string>>[] = [];
+
+      for (const path of paths) {
+        const charCells = new Map<string, Set<string>>();
+
+        // 固定部分をコピー
+        for (const [char, nids] of fixedCells.entries()) {
+          charCells.set(char, new Set(nids));
+        }
+
+        // 候補パス部分を追加
+        for (const step of path) {
+          if (!charCells.has(step.char)) {
+            charCells.set(step.char, new Set());
+          }
+          charCells.get(step.char)!.add(step.nid);
+        }
+
+        pathsCharCellsMaps.push(charCells);
+      }
+
+      pathCharCellsCache.set(wNum, pathsCharCellsMaps);
+    }
+
     // 枝刈り: どの残り単語の候補パスもカバーできない空きマス（デッドセル）の検出
     const checkDeadCells = (): boolean => {
       const emptyNids: string[] = [];
@@ -1384,7 +1429,7 @@ export async function solveZigzagAsync(
       return true;
     };
 
-    const backtrackGroup = async (wIdx: number, currentAssignments: Map<number, {nid: string, char: string}[]>) => {
+    const backtrackGroup = async (wIdx: number, currentAssignments: Map<number, number>) => {
       iterations++;
       if (iterations > maxLocalIterations) {
         throw new Error("local_limit_exceeded");
@@ -1403,8 +1448,12 @@ export async function solveZigzagAsync(
       }
 
       if (wIdx === nWords) {
+        const finalAssignments = new Map<number, { nid: string, char: string }[]>();
+        for (const [wn, pi] of currentAssignments.entries()) {
+          finalAssignments.set(wn, wordPaths.get(wn)![pi]);
+        }
         patterns.push({
-          assignments: new Map(currentAssignments)
+          assignments: finalAssignments
         });
         if (patterns.length > 20000) {
           throw new Error("too_many_patterns");
@@ -1419,18 +1468,12 @@ export async function solveZigzagAsync(
         const path = paths[pIdx];
         let canPlace = true;
 
-        const usedThisTime = new Set<string>();
         for (const step of path) {
           const node = nodeMap.get(step.nid)!;
           if (node.isFixed && node.currentChar !== step.char) {
             canPlace = false;
             break;
           }
-          if (usedThisTime.has(step.nid)) {
-            canPlace = false;
-            break;
-          }
-          usedThisTime.add(step.nid);
         }
 
         if (!canPlace) continue;
@@ -1438,53 +1481,16 @@ export async function solveZigzagAsync(
         // グループ内共有文字マス一致チェック (同じ共有文字は必ず同じマスを使用する)
         const wordSharing = groupSharing.get(wNum);
         if (wordSharing) {
+          const selfCharCells = pathCharCellsCache.get(wNum)![pIdx];
+          
           for (const [otherWNum, sharedChars] of wordSharing.entries()) {
             if (currentAssignments.has(otherWNum)) {
-              const otherPath = currentAssignments.get(otherWNum)!;
-              const otherWord = solverWords.find(sw => sw.logiNumber === otherWNum)!;
-              const otherFixedLen = getFixedLength(otherWord);
-
-              const otherCellsByChar = new Map<string, Set<string>>();
-              for (const step of otherPath) {
-                if (!otherCellsByChar.has(step.char)) {
-                  otherCellsByChar.set(step.char, new Set());
-                }
-                otherCellsByChar.get(step.char)!.add(step.nid);
-              }
-              for (let i = 1; i <= otherFixedLen; i++) {
-                const nid = otherWord.fixedNodeIDs[i];
-                if (nid) {
-                  const char = otherWord.text[i - 1];
-                  if (!otherCellsByChar.has(char)) {
-                    otherCellsByChar.set(char, new Set());
-                  }
-                  otherCellsByChar.get(char)!.add(nid);
-                }
-              }
-
-              const selfWord = solverWords.find(sw => sw.logiNumber === wNum)!;
-              const selfFixedLen = getFixedLength(selfWord);
-              const selfCellsByChar = new Map<string, Set<string>>();
-              for (const step of path) {
-                if (!selfCellsByChar.has(step.char)) {
-                  selfCellsByChar.set(step.char, new Set());
-                }
-                selfCellsByChar.get(step.char)!.add(step.nid);
-              }
-              for (let i = 1; i <= selfFixedLen; i++) {
-                const nid = selfWord.fixedNodeIDs[i];
-                if (nid) {
-                  const char = selfWord.text[i - 1];
-                  if (!selfCellsByChar.has(char)) {
-                    selfCellsByChar.set(char, new Set());
-                  }
-                  selfCellsByChar.get(char)!.add(nid);
-                }
-              }
+              const otherPIdx = currentAssignments.get(otherWNum)!;
+              const otherCharCells = pathCharCellsCache.get(otherWNum)![otherPIdx];
 
               for (const char of sharedChars) {
-                const otherNids = otherCellsByChar.get(char);
-                const selfNids = selfCellsByChar.get(char);
+                const otherNids = otherCharCells.get(char);
+                const selfNids = selfCharCells.get(char);
                 if (otherNids && selfNids) {
                   let hasCommonCell = false;
                   for (const nid of selfNids) {
@@ -1520,7 +1526,7 @@ export async function solveZigzagAsync(
           }
         }
         word.isUsed = true;
-        currentAssignments.set(wNum, path);
+        currentAssignments.set(wNum, pIdx);
 
         await backtrackGroup(wIdx + 1, currentAssignments);
 
