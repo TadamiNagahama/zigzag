@@ -1340,7 +1340,7 @@ export async function solveZigzagAsync(
     const nWords = groupWordNums.length;
 
     let iterations = 0;
-    const maxLocalIterations = 100000;
+    const maxLocalIterations = 1000000;
 
     // 枝刈り: どの残り単語の候補パスもカバーできない空きマス（デッドセル）の検出
     const checkDeadCells = (): boolean => {
@@ -1405,7 +1405,7 @@ export async function solveZigzagAsync(
         patterns.push({
           assignments: new Map(currentAssignments)
         });
-        if (patterns.length > 500) {
+        if (patterns.length > 20000) {
           throw new Error("too_many_patterns");
         }
         return;
@@ -1736,18 +1736,21 @@ export async function solveZigzagAsync(
     const maxIterations = 5000000;
     let shownLimitWarning = false;
 
+    if (onBacktrackEnd) onBacktrackEnd();
+
+    let isConfirmed = false;
     if (onConfirm) {
-      const isConfirmed = await onConfirm("総当たりをやります。時間がかかりますが、イイですか？");
-      if (!isConfirmed) {
-        log(`[Backtrack] キャンセルされました。`);
-        return false;
-      }
+      isConfirmed = await onConfirm("総当たりをやります。時間がかかりますが、イイですか？");
     } else {
-      if (!window.confirm("総当たりをやります。時間がかかりますが、イイですか？")) {
-        log(`[Backtrack] キャンセルされました。`);
-        return false;
-      }
+      isConfirmed = window.confirm("総当たりをやります。時間がかかりますが、イイですか？");
     }
+
+    if (!isConfirmed) {
+      log(`[Backtrack] キャンセルされました。`);
+      return false;
+    }
+
+    if (onBacktrackStart) onBacktrackStart();
 
     const backtrack = async (wordIdx: number): Promise<boolean> => {
       iterations++;
@@ -1943,7 +1946,14 @@ export async function solveZigzagAsync(
         log("[Solver] ユーザーによって解答が中止されました。");
         backtrackSuccess = false;
       } else {
-        log(`[GroupSolve] グループ総当たり中にエラーまたは上限超過が発生したため、従来のフル総当たりにフォールバックします。理由: ${e.message}`);
+        let reason = e.message;
+        if (e.message === "too_many_patterns") {
+          reason = "グループ内の配置パターン数が上限（2万通り）を超過したため";
+        } else if (e.message === "local_limit_exceeded") {
+          reason = "グループ内の探索ステップ数が上限（100万回）に達したため";
+        }
+        log(`[Solver] 共有グループ探索（KGL）が中断されました（理由: ${reason}）。`);
+        log(`[Solver] フォールバックとして従来のフル総当たりを実行します。`);
         backtrackSuccess = await solveByBacktracking();
       }
     }
