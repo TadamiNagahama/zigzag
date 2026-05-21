@@ -14,7 +14,7 @@ export const HelpDialog: React.FC<HelpDialogProps> = ({ onClose }) => {
     { id: 'edit', label: '問題作成', icon: <Edit3 size={18} /> },
     { id: 'answer', label: '解答作成', icon: <CheckCircle size={18} /> },
     { id: 'genres', label: '特殊ジャンル', icon: <Layers size={18} /> },
-    { id: 'export', label: 'Excel出力', icon: <FileDown size={18} /> },
+    { id: 'export', label: 'Excel読込・出力', icon: <FileDown size={18} /> },
     { id: 'security', label: 'セキュリティ', icon: <Shield size={18} /> },
     { id: 'contact', label: 'お問い合わせ等', icon: <Mail size={18} /> },
   ] as const;
@@ -171,11 +171,12 @@ export const HelpDialog: React.FC<HelpDialogProps> = ({ onClose }) => {
             <div className="help-section">
               <p>リストエリア最上部のモード切替で「解答面」を選択します。</p>
               <ul>
-                <li><strong>ドラッグで入力</strong>: 数字のマスから始めて、文字が入る順にマウスをドラッグしてください。文字が自動的にトレースして入力されます。</li>
+                <li><strong>ドラッグで入力</strong>: 数字のマスから始めて、文字が入る順にマウスをドラッグしてください。文字が自動的にトレースして入力されます。<br />文字の途中からドラッグすることもできます。</li>
                 <li><strong>1文字目の保護</strong>: 既に文字が入っている数字マスの上を通過しても、そのマスの文字は上書きされません。</li>
                 <li><strong>解答欄作成</strong>: ドラッグ中、解答マスに文字が入ると、自動的に解答欄に文字が入力されます。</li>
                 <li><strong>残るもの</strong>: Ｗリスト / Ｗリスト★でリスト2が余る解答出しがある場合は、解答欄のリストを選択します。</li>
-                <li><strong>完成チェック</strong>: 盤面が完成したら、成立しているかミスがないかを自動チェックできます。</li>
+                <li><strong>自動解答</strong>: コンピューターに問題を解かせます。時間がかかる場合があります。</li>
+                <li><strong>完成チェック</strong>: 自分で文字を入力し盤面を完成させたら、解答として成立しているかミスがないかを自動チェックできます。</li>
               </ul>
             </div>
           </div>
@@ -253,6 +254,18 @@ export const HelpDialog: React.FC<HelpDialogProps> = ({ onClose }) => {
                 <li><strong>マス設定</strong>: 1マスをExcelの何セル分（1x1, 2x1, 3x3）で描画するか選べます。</li>
                 <li><strong>フォント設定</strong>: フォントの選択やサイズ指定ができます。</li>
                 <li><strong>リスト設定</strong>: リストの位置または単独シートを設定できます。</li>
+              </ul>
+            </div>
+
+            <h3>Excel読込の設定</h3>
+            <p>原稿として作成した過去のExcelファイルを読み込むことができます。</p>
+
+            <div className="help-section">
+              <h4>主な設定項目</h4>
+              <ul>
+                <li><strong>問題面</strong>: 問題面のあるシートを選択し、左上のセルを指定します。1マスがExcelの何セル分（1x1, 2x1, 3x3）で作成されているか間違いなく選んでください。</li>
+                <li><strong>解答面</strong>: 解答面のあるシートを選択し、左上のセルを指定します。問題面同様、1マスが何セルか忘れずに選択してください。</li>
+                <li><strong>単語リスト</strong>: リストのあるシートを選択し、リストを数字を含む形で左上と右下の範囲指定をします。</li>
               </ul>
             </div>
 

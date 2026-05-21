@@ -43,6 +43,38 @@ export type SolverStepCallback = (cells: Cell[][]) => Promise<void>;
 export type SolverLogCallback = (message: string) => void;
 
 /**
+ * 配列を指定された分割数 K 個の空でない部分集合に分割するすべての組み合わせを生成するジェネレータ
+ */
+function* getPartitions<T>(arr: T[], K: number): Generator<T[][]> {
+  if (K === 1) {
+    yield [arr];
+    return;
+  }
+  if (arr.length === K) {
+    yield arr.map(x => [x]);
+    return;
+  }
+  if (arr.length < K) return;
+
+  const first = arr[0];
+  const rest = arr.slice(1);
+
+  // Case 1: first が単独で新しいサブグループを形成する
+  for (const part of getPartitions(rest, K - 1)) {
+    yield [[first], ...part];
+  }
+
+  // Case 2: first が既存のサブグループのいずれかに追加される
+  for (const part of getPartitions(rest, K)) {
+    for (let i = 0; i < part.length; i++) {
+      const newPart = part.map(s => [...s]);
+      newPart[i].push(first);
+      yield newPart;
+    }
+  }
+}
+
+/**
  * ジグザグ解答ロジック (非同期版)
  */
 export async function solveZigzagAsync(
@@ -1726,6 +1758,127 @@ export async function solveZigzagAsync(
     });
 
     const groupPatternsList: GroupPattern[][] = [];
+
+    const resolveGroupContradiction = async (group: number[]): Promise<GroupPattern[]> => {
+      const N = group.length;
+      if (N <= 1 || N > 12) return []; // 単語数12以下のグループのみ分割救済を試みる
+
+      log(`[GroupSolve] グループの矛盾を検知しました。グループ分割による救済探索を開始します... (単語数: ${N})`);
+
+      const subsetMemo = new Map<string, GroupPattern[]>();
+
+      const getPats = async (subset: number[]): Promise<GroupPattern[]> => {
+        const key = subset.slice().sort((a, b) => a - b).join(",");
+        if (subsetMemo.has(key)) return subsetMemo.get(key)!;
+        
+        const subSharing = new Map<number, Map<number, Set<string>>>();
+        for (const wNum of subset) subSharing.set(wNum, new Map());
+        for (const [charKey, words] of nodeCharToWords.entries()) {
+          const lastColonIdx = charKey.lastIndexOf(":");
+          if (lastColonIdx === -1) continue;
+          const char = charKey.substring(lastColonIdx + 1);
+          const subWords = words.filter(w => subset.includes(w));
+          if (subWords.length > 1) {
+            for (let i = 0; i < subWords.length; i++) {
+              for (let j = i + 1; j < subWords.length; j++) {
+                const w1 = subWords[i];
+                const w2 = subWords[j];
+                if (!subSharing.get(w1)!.has(w2)) subSharing.get(w1)!.set(w2, new Set());
+                subSharing.get(w1)!.get(w2)!.add(char);
+                if (!subSharing.get(w2)!.has(w1)) subSharing.get(w2)!.set(w1, new Set());
+                subSharing.get(w2)!.get(w1)!.add(char);
+              }
+            }
+          }
+        }
+
+        const pats = await findGroupPatterns(subset, wordPaths, subSharing, checkCancelled);
+        subsetMemo.set(key, pats);
+        return pats;
+      };
+
+      for (let K = 2; K <= N; K++) {
+        log(`[GroupSolve]  分割数 ${K} で検証中...`);
+        let anyValidPartition = false;
+        const allMergedPatterns: GroupPattern[] = [];
+        const uniqueKeys = new Set<string>();
+        
+        for (const partition of getPartitions(group, K)) {
+          await checkYield();
+          let partitionValid = true;
+          const partitionPatsList: GroupPattern[][] = [];
+
+          for (const subset of partition) {
+            const pats = await getPats(subset);
+            if (pats.length === 0) {
+              partitionValid = false;
+              break;
+            }
+            partitionPatsList.push(pats);
+          }
+
+          if (partitionValid) {
+            const combineSubsets = (idx: number, currentAssignments: Map<number, {nid: string, char: string}[]>, usedNids: Set<string>) => {
+              if (idx === K) {
+                const entries = Array.from(currentAssignments.entries()).sort((a, b) => a[0] - b[0]);
+                let key = "";
+                for (const [wNum, path] of entries) {
+                  key += `${wNum}:`;
+                  for (const step of path) key += `${step.nid},`;
+                  key += "|";
+                }
+                if (!uniqueKeys.has(key)) {
+                  uniqueKeys.add(key);
+                  allMergedPatterns.push({ assignments: new Map(currentAssignments) });
+                  anyValidPartition = true;
+                }
+                return;
+              }
+
+              const subsetPats = partitionPatsList[idx];
+              for (const pat of subsetPats) {
+                let overlap = false;
+                const newlyUsed = new Set<string>();
+                for (const path of pat.assignments.values()) {
+                  for (const step of path) {
+                    if (usedNids.has(step.nid)) {
+                      overlap = true;
+                      break;
+                    }
+                    newlyUsed.add(step.nid);
+                  }
+                  if (overlap) break;
+                }
+                
+                if (!overlap) {
+                  for (const nid of newlyUsed) usedNids.add(nid);
+                  for (const [wNum, path] of pat.assignments.entries()) {
+                    currentAssignments.set(wNum, path);
+                  }
+                  
+                  combineSubsets(idx + 1, currentAssignments, usedNids);
+                  
+                  for (const nid of newlyUsed) usedNids.delete(nid);
+                  for (const wNum of pat.assignments.keys()) {
+                    currentAssignments.delete(wNum);
+                  }
+                }
+              }
+            };
+            
+            combineSubsets(0, new Map(), new Set());
+          }
+        }
+
+        if (anyValidPartition && allMergedPatterns.length > 0) {
+          log(`[GroupSolve]  分割数 ${K} で有効な配置パターンを発見しました！（救済成功、パターン数: ${allMergedPatterns.length}）`);
+          return allMergedPatterns;
+        }
+      }
+
+      return [];
+    };
+
     for (let gIdx = 0; gIdx < groups.length; gIdx++) {
       const group = groups[gIdx];
       
@@ -1774,10 +1927,13 @@ export async function solveZigzagAsync(
         log(`[GroupSolve]   単語 [${wNum}] の候補パス数: ${paths.length}`);
       });
 
-      const pats = await findGroupPatterns(group, wordPaths, groupSharing, checkCancelled);
+      let pats = await findGroupPatterns(group, wordPaths, groupSharing, checkCancelled);
       if (pats.length === 0) {
-        log(`[GroupSolve] グループ #${gIdx + 1} に有効な配置パターンがありません。矛盾です。`);
-        return false;
+        pats = await resolveGroupContradiction(group);
+        if (pats.length === 0) {
+          log(`[GroupSolve] グループ #${gIdx + 1} に有効な配置パターンがありません。分割救済でも解決できませんでした。矛盾です。`);
+          return false;
+        }
       }
       log(`[GroupSolve] グループ #${gIdx + 1} パターン数: ${pats.length}`);
       groupPatternsList.push(pats);

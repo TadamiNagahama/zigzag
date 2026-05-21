@@ -14,7 +14,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   confirmText = 'はい', cancelText = 'キャンセル', isDestructive = false 
 }) => {
   return (
-    <div className="modal-overlay" style={{ zIndex: 4000 }}>
+    <div className="modal-overlay" style={{ zIndex: 5000 }}>
       <div className="modal-content glass card" style={{ width: '400px', textAlign: 'center', padding: '32px' }}>
         <h3 style={{ color: isDestructive ? '#ef4444' : 'var(--text-color)', marginBottom: '16px' }}>確認</h3>
         <div style={{ marginBottom: '24px', lineHeight: '1.6', fontSize: '0.95rem', whiteSpace: 'pre-wrap' }}>

@@ -329,6 +329,7 @@ function App() {
 
   const [isSolving, setIsSolving] = useState(false);
   const [isBacktracking, setIsBacktracking] = useState(false);
+  const [solveProgressCount, setSolveProgressCount] = useState(0);
   const isCancelledRef = useRef(false);
 
   const handleCancelSolve = () => {
@@ -1165,6 +1166,7 @@ function App() {
 
     isCancelledRef.current = false;
     setIsBacktracking(false);
+    setSolveProgressCount(0);
 
     try {
       const confirmAsync = (msg: string): Promise<boolean> => {
@@ -1196,7 +1198,8 @@ function App() {
         confirmAsync,
         () => isCancelledRef.current,
         () => setIsBacktracking(true),
-        () => setIsBacktracking(false)
+        () => setIsBacktracking(false),
+        (count) => setSolveProgressCount(count)
       );
 
       if (result.success) {
@@ -1312,11 +1315,18 @@ function App() {
   const handleAutoSolve = () => {
     // 制限チェック
     const currentType = puzzle.puzzleType || 'ノーマル';
-    const hasShaded = puzzle.cells.some(row => row.some(c => c.isShaded));
-    const isSupportedType = currentType === 'ノーマル' || currentType === '通常' || currentType === '矢印' || currentType === 'ウルトラ' || hasShaded;
+    
+    // 現在対応しているのは「ノーマル（通常）」「矢印」「超（網掛けあり）＋ノーマル」のみ
+    // Wリストなどは未対応
+    let isSupportedType = false;
+    if (currentType === 'ノーマル' || currentType === '通常') {
+      isSupportedType = true; // ノーマル、および 超＋ノーマル
+    } else if (currentType === '矢印') {
+      isSupportedType = true;
+    }
+
     if (!isSupportedType) {
-      console.log('AutoSolve restriction triggered:', { currentType, hasShaded });
-      setAlertMessage(`自動解答は現在「ノーマル」「矢印」「ウルトラ」等の標準的な問題形式にのみ対応しています。（現在の形式：${currentType}）`);
+      setAlertMessage(`このジャンルはまだ対応していません。将来的に対応予定ですが、日時は未定です`);
       return;
     }
 
@@ -2754,12 +2764,19 @@ function App() {
             />
           )}
 
-          {isBacktracking && (
+          {isSolving && (
             <div className="modal-overlay" style={{ zIndex: 4000 }}>
               <div className="modal-content glass card" style={{ width: '400px', textAlign: 'center', padding: '32px' }}>
                 <h3 style={{ color: 'var(--text-color)', marginBottom: '16px' }}>自動解答中</h3>
                 <div style={{ marginBottom: '24px', lineHeight: '1.6', fontSize: '0.95rem' }}>
-                  総当たりを実行しています。時間がかかる場合があります。
+                  {isBacktracking 
+                    ? "総当たりを実行しています。時間がかかる場合があります。" 
+                    : "盤面を解析しています。しばらくお待ちください。"}
+                  {solveProgressCount > 0 && (
+                    <div style={{ marginTop: '12px', fontSize: '0.9rem', fontWeight: 'bold', color: 'var(--accent-color, #3b82f6)' }}>
+                      実行ステップ数: {solveProgressCount.toLocaleString()}
+                    </div>
+                  )}
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'center' }}>
                   <button 
