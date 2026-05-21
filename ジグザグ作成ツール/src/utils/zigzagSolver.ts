@@ -1646,7 +1646,6 @@ export async function solveZigzagAsync(
   const findGroupPatterns = async (
     groupWordNums: number[],
     wordPaths: Map<number, {nid: string, char: string}[][]>,
-    groupSharing: Map<number, Map<number, Set<string>>>,
     checkCancelled?: () => boolean
   ): Promise<GroupPattern[]> => {
     const patterns: GroupPattern[] = [];
@@ -1654,52 +1653,6 @@ export async function solveZigzagAsync(
 
     let iterations = 0;
     const maxLocalIterations = 1000000;
-
-    // 各単語の各候補パスについて、文字ごとに使用するセルの集合を事前計算してキャッシュする
-    const pathCharCellsCache: Map<number, Map<string, Set<string>>[]> = new Map();
-
-    for (const wNum of groupWordNums) {
-      const paths = wordPaths.get(wNum)!;
-      const selfWord = solverWords.find(sw => sw.logiNumber === wNum)!;
-      const selfFixedLen = getFixedLength(selfWord);
-
-      // 固定部分の文字とマスのマップを事前構築
-      const fixedCells: Map<string, Set<string>> = new Map();
-      for (let i = 1; i <= selfFixedLen; i++) {
-        const nid = selfWord.fixedNodeIDs[i];
-        if (nid) {
-          const char = selfWord.text[i - 1];
-          if (!fixedCells.has(char)) {
-            fixedCells.set(char, new Set());
-          }
-          fixedCells.get(char)!.add(nid);
-        }
-      }
-
-      const pathsCharCellsMaps: Map<string, Set<string>>[] = [];
-
-      for (const path of paths) {
-        await checkYield();
-        const charCells = new Map<string, Set<string>>();
-
-        // 固定部分をコピー
-        for (const [char, nids] of fixedCells.entries()) {
-          charCells.set(char, new Set(nids));
-        }
-
-        // 候補パス部分を追加
-        for (const step of path) {
-          if (!charCells.has(step.char)) {
-            charCells.set(step.char, new Set());
-          }
-          charCells.get(step.char)!.add(step.nid);
-        }
-
-        pathsCharCellsMaps.push(charCells);
-      }
-
-      pathCharCellsCache.set(wNum, pathsCharCellsMaps);
-    }
 
     const backtrackGroup = async (wIdx: number, currentAssignments: Map<number, number>) => {
       iterations++;
@@ -1742,40 +1695,6 @@ export async function solveZigzagAsync(
           if (node.isFixed && node.currentChar !== step.char) {
             canPlace = false;
             break;
-          }
-        }
-
-        if (!canPlace) continue;
-
-        // グループ内共有文字マス一致チェック (同じ共有文字は必ず同じマスを使用する)
-        const wordSharing = groupSharing.get(wNum);
-        if (wordSharing) {
-          const selfCharCells = pathCharCellsCache.get(wNum)![pIdx];
-          
-          for (const [otherWNum, sharedChars] of wordSharing.entries()) {
-            if (currentAssignments.has(otherWNum)) {
-              const otherPIdx = currentAssignments.get(otherWNum)!;
-              const otherCharCells = pathCharCellsCache.get(otherWNum)![otherPIdx];
-
-              for (const char of sharedChars) {
-                const otherNids = otherCharCells.get(char);
-                const selfNids = selfCharCells.get(char);
-                if (otherNids && selfNids) {
-                  let hasCommonCell = false;
-                  for (const nid of selfNids) {
-                    if (otherNids.has(nid)) {
-                      hasCommonCell = true;
-                      break;
-                    }
-                  }
-                  if (!hasCommonCell) {
-                    canPlace = false;
-                    break;
-                  }
-                }
-              }
-            }
-            if (!canPlace) break;
           }
         }
 
@@ -1926,28 +1845,7 @@ export async function solveZigzagAsync(
         const key = subset.slice().sort((a, b) => a - b).join(",");
         if (subsetMemo.has(key)) return subsetMemo.get(key)!;
         
-        const subSharing = new Map<number, Map<number, Set<string>>>();
-        for (const wNum of subset) subSharing.set(wNum, new Map());
-        for (const [charKey, words] of nodeCharToWords.entries()) {
-          const lastColonIdx = charKey.lastIndexOf(":");
-          if (lastColonIdx === -1) continue;
-          const char = charKey.substring(lastColonIdx + 1);
-          const subWords = words.filter(w => subset.includes(w));
-          if (subWords.length > 1) {
-            for (let i = 0; i < subWords.length; i++) {
-              for (let j = i + 1; j < subWords.length; j++) {
-                const w1 = subWords[i];
-                const w2 = subWords[j];
-                if (!subSharing.get(w1)!.has(w2)) subSharing.get(w1)!.set(w2, new Set());
-                subSharing.get(w1)!.get(w2)!.add(char);
-                if (!subSharing.get(w2)!.has(w1)) subSharing.get(w2)!.set(w1, new Set());
-                subSharing.get(w2)!.get(w1)!.add(char);
-              }
-            }
-          }
-        }
-
-        const pats = await findGroupPatterns(subset, wordPaths, subSharing, checkCancelled);
+        const pats = await findGroupPatterns(subset, wordPaths, checkCancelled);
         subsetMemo.set(key, pats);
         return pats;
       };
@@ -2043,48 +1941,13 @@ export async function solveZigzagAsync(
         throw new Error("cancelled");
       }
 
-      // グループ内の単語間で、どの文字を共有すべきかのペアリストを構築
-      // キー: wNum -> Map<otherWNum, Set<char>>
-      const groupSharing: Map<number, Map<number, Set<string>>> = new Map();
-      for (const wNum of group) {
-        groupSharing.set(wNum, new Map());
-      }
-
-      for (const [key, words] of nodeCharToWords.entries()) {
-        await checkYield();
-        const lastColonIdx = key.lastIndexOf(":");
-        if (lastColonIdx === -1) continue;
-        const char = key.substring(lastColonIdx + 1);
-        
-        // このキーに属する単語のうち、現在のグループに含まれるものだけを抽出
-        const groupWords = words.filter(w => group.includes(w));
-        if (groupWords.length > 1) {
-          for (let i = 0; i < groupWords.length; i++) {
-            for (let j = i + 1; j < groupWords.length; j++) {
-              const w1 = groupWords[i];
-              const w2 = groupWords[j];
-              
-              if (!groupSharing.get(w1)!.has(w2)) {
-                groupSharing.get(w1)!.set(w2, new Set());
-              }
-              groupSharing.get(w1)!.get(w2)!.add(char);
-
-              if (!groupSharing.get(w2)!.has(w1)) {
-                groupSharing.get(w2)!.set(w1, new Set());
-              }
-              groupSharing.get(w2)!.get(w1)!.add(char);
-            }
-          }
-        }
-      }
-
       log(`[GroupSolve] グループ #${gIdx + 1} のローカル総当たり中...`);
       group.forEach(wNum => {
         const paths = wordPaths.get(wNum) || [];
         log(`[GroupSolve]   単語 [${wNum}] の候補パス数: ${paths.length}`);
       });
 
-      let pats = await findGroupPatterns(group, wordPaths, groupSharing, checkCancelled);
+      let pats = await findGroupPatterns(group, wordPaths, checkCancelled);
       if (pats.length === 0) {
         pats = await resolveGroupContradiction(group);
         if (pats.length === 0) {
