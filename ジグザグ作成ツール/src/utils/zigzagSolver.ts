@@ -1730,10 +1730,13 @@ export async function solveZigzagAsync(
   };
 
   const solveWithGroups = async (): Promise<boolean> => {
-    const remainingWords = solverWords.filter(w => !w.isUsed);
-    if (remainingWords.length === 0) return true;
+    let groupPatternsList: GroupPattern[][] = [];
 
-    log(`[GroupSolve] グループ総当たりを開始します... (対象単語数: ${remainingWords.length})`);
+    while (true) {
+      const remainingWords = solverWords.filter(w => !w.isUsed);
+      if (remainingWords.length === 0) return true;
+
+      log(`[GroupSolve] グループ総当たりを開始します... (対象単語数: ${remainingWords.length})`);
     
     const allowedChoStarts = getChoAllowedStartNodes();
     const wordPaths = new Map<number, {nid: string, char: string}[][]>();
@@ -1831,7 +1834,7 @@ export async function solveZigzagAsync(
       log(`[GroupSolve] グループ #${idx + 1}: 単語リスト [${g.join(", ")}]`);
     });
 
-    const groupPatternsList: GroupPattern[][] = [];
+    groupPatternsList = [];
 
     const resolveGroupContradiction = async (group: number[]): Promise<GroupPattern[]> => {
       const N = group.length;
@@ -1958,6 +1961,72 @@ export async function solveZigzagAsync(
       log(`[GroupSolve] グループ #${gIdx + 1} パターン数: ${pats.length}`);
       groupPatternsList.push(pats);
     }
+
+    // --- パターン数1のグループ確定処理 ---
+    const singlePatternGroups: { gIdx: number, pat: GroupPattern }[] = [];
+    for (let i = 0; i < groupPatternsList.length; i++) {
+      if (groupPatternsList[i].length === 1) {
+        singlePatternGroups.push({ gIdx: i, pat: groupPatternsList[i][0] });
+      }
+    }
+
+    if (singlePatternGroups.length > 0) {
+      let hasConflict = false;
+      const tempUsedCells = new Map<string, string>();
+      for (const { pat } of singlePatternGroups) {
+        for (const path of pat.assignments.values()) {
+          for (const step of path) {
+            if (tempUsedCells.has(step.nid) && tempUsedCells.get(step.nid) !== step.char) {
+              hasConflict = true;
+              break;
+            }
+            const node = nodeMap.get(step.nid)!;
+            if (node.isFixed && node.currentChar !== step.char) {
+              hasConflict = true;
+              break;
+            }
+            tempUsedCells.set(step.nid, step.char);
+          }
+          if (hasConflict) break;
+        }
+        if (hasConflict) break;
+      }
+
+      if (hasConflict) {
+        log(`[GroupSolve] パターン数1のグループ同士、または既定の文字と衝突が発生しました。`);
+        return false; // 矛盾
+      }
+
+      let appliedAny = false;
+      for (const { pat } of singlePatternGroups) {
+        for (const [wNum, path] of pat.assignments.entries()) {
+          const word = solverWords.find(sw => sw.logiNumber === wNum)!;
+          const fixedLen = getFixedLength(word);
+          for (let i = 0; i < path.length; i++) {
+            const step = path[i];
+            const node = nodeMap.get(step.nid)!;
+            fixNode(node, step.char);
+            word.fixedNodeIDs[fixedLen + i + 1] = step.nid;
+            if (fixedLen === 0 && i === 0) {
+              node.logiNumber = wNum;
+            }
+          }
+          word.isUsed = true;
+          appliedAny = true;
+          log(`[GroupSolve] グループの唯一のパターンを確定適用しました: 単語 [${wNum}]`);
+        }
+      }
+
+      if (appliedAny) {
+        await reportStep();
+        log(`[GroupSolve] パターン数1のグループ確定を適用したため、再度グループ洗い出しをやり直します。`);
+        continue; // while(true) の先頭へ戻ってやり直す
+      }
+    }
+
+    break; // while(true) ループを抜けて制約伝播へ
+  }
+
     // --- 制約伝播 (Constraint Propagation) ---
     let propagationChanged = true;
     let propIterations = 0;
@@ -2085,7 +2154,7 @@ export async function solveZigzagAsync(
     const currentComb: GroupPattern[] = [];
 
     const searchComb = async (gIdx: number): Promise<boolean> => {
-      if (gIdx === groups.length) {
+      if (gIdx === groupPatternsList.length) {
         const snap = createSnapshot();
         const ok = applyCombination(currentComb);
         if (!ok) {
