@@ -1973,7 +1973,7 @@ export async function solveZigzagAsync(
           }
 
           if (partitionValid) {
-            const combineSubsets = (idx: number, currentAssignments: Map<number, {nid: string, char: string}[]>, usedNids: Set<string>) => {
+            const combineSubsets = (idx: number, currentAssignments: Map<number, {nid: string, char: string}[]>, usedNidChars: Map<string, string>) => {
               if (idx === K) {
                 const entries = Array.from(currentAssignments.entries()).sort((a, b) => a[0] - b[0]);
                 let key = "";
@@ -1993,27 +1993,29 @@ export async function solveZigzagAsync(
               const subsetPats = partitionPatsList[idx];
               for (const pat of subsetPats) {
                 let overlap = false;
-                const newlyUsed = new Set<string>();
+                const newlyUsed = new Map<string, string>();
                 for (const path of pat.assignments.values()) {
                   for (const step of path) {
-                    if (usedNids.has(step.nid)) {
-                      overlap = true;
-                      break;
+                    if (usedNidChars.has(step.nid)) {
+                      if (usedNidChars.get(step.nid) !== step.char) {
+                        overlap = true;
+                        break;
+                      }
                     }
-                    newlyUsed.add(step.nid);
+                    newlyUsed.set(step.nid, step.char);
                   }
                   if (overlap) break;
                 }
                 
                 if (!overlap) {
-                  for (const nid of newlyUsed) usedNids.add(nid);
+                  for (const [nid, char] of newlyUsed.entries()) usedNidChars.set(nid, char);
                   for (const [wNum, path] of pat.assignments.entries()) {
                     currentAssignments.set(wNum, path);
                   }
                   
-                  combineSubsets(idx + 1, currentAssignments, usedNids);
+                  combineSubsets(idx + 1, currentAssignments, usedNidChars);
                   
-                  for (const nid of newlyUsed) usedNids.delete(nid);
+                  for (const nid of newlyUsed.keys()) usedNidChars.delete(nid);
                   for (const wNum of pat.assignments.keys()) {
                     currentAssignments.delete(wNum);
                   }
@@ -2021,7 +2023,7 @@ export async function solveZigzagAsync(
               }
             };
             
-            combineSubsets(0, new Map(), new Set());
+            combineSubsets(0, new Map(), new Map());
           }
         }
 
@@ -2155,7 +2157,7 @@ export async function solveZigzagAsync(
             }
           } else {
             const existing = invariantFixedNodes.get(nid)!;
-            if (existing.gIdx !== gIdx || existing.char !== char) {
+            if (existing.char !== char) {
               log(`[GroupSolve] 不変ノードのマス衝突を検出しました（ノード ${nid}）。矛盾です。`);
               return false;
             }
@@ -2175,13 +2177,7 @@ export async function solveZigzagAsync(
               for (const step of path) {
                 if (invariantFixedNodes.has(step.nid)) {
                   const inv = invariantFixedNodes.get(step.nid)!;
-                  if (inv.gIdx === gIdx) {
-                    if (inv.char !== step.char) {
-                      isValid = false; 
-                      break;
-                    }
-                  } else {
-                    // 別のグループが確保しているマスを使おうとしているため衝突
+                  if (inv.char !== step.char) {
                     isValid = false; 
                     break;
                   }
@@ -2304,13 +2300,8 @@ export async function solveZigzagAsync(
         for (const step of path) {
           if (globalUsedCells.has(step.nid)) {
             const existing = globalUsedCells.get(step.nid)!;
-            // 同じグループ内でのマスの共有はOK（文字が一致している必要がある）
-            if (existing.gIdx === gIdx) {
-              if (existing.char !== step.char) return false;
-            } else {
-              // 異なるグループ間でのマスの重複が発生
-              return false;
-            }
+            // 異なるグループであっても、同じ文字を置く場合は許容する
+            if (existing.char !== step.char) return false;
           } else {
             globalUsedCells.set(step.nid, { char: step.char, gIdx });
           }
