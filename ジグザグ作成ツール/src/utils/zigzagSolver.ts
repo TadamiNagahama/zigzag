@@ -1729,7 +1729,12 @@ export async function solveZigzagAsync(
     return patterns;
   };
 
-  const solveWithGroups = async (): Promise<boolean> => {
+  const solveWithGroups = async (
+    starContext?: {
+      unassignedStarLogiNums: Set<number>;
+      unusedList2Words: string[];
+    }
+  ): Promise<boolean> => {
     let groupPatternsList: GroupPattern[][] = [];
 
     while (true) {
@@ -1962,7 +1967,7 @@ export async function solveZigzagAsync(
       groupPatternsList.push(pats);
     }
 
-    // --- パターン数1のグループ確定処理 ---
+    // --- パターン数1 of グループ確定処理 ---
     const singlePatternGroups: { gIdx: number, pat: GroupPattern }[] = [];
     for (let i = 0; i < groupPatternsList.length; i++) {
       if (groupPatternsList[i].length === 1) {
@@ -1971,56 +1976,113 @@ export async function solveZigzagAsync(
     }
 
     if (singlePatternGroups.length > 0) {
-      let hasConflict = false;
-      const tempUsedCells = new Map<string, string>();
+      const groupsToApply: { pat: GroupPattern, starAss: Map<number, string> }[] = [];
+
       for (const { pat } of singlePatternGroups) {
-        for (const path of pat.assignments.values()) {
-          for (const step of path) {
-            if (tempUsedCells.has(step.nid) && tempUsedCells.get(step.nid) !== step.char) {
-              hasConflict = true;
+        let groupValid = true;
+        const starAss = new Map<number, string>();
+
+        for (const [wNum, path] of pat.assignments.entries()) {
+          const isStar = starContext && starContext.unassignedStarLogiNums.has(wNum);
+          if (isStar) {
+            // この経路 path に適合する unusedList2Words を探す
+            const candidates = starContext.unusedList2Words.filter(wordText => {
+              if (wordText.length !== path.length) return false;
+              for (let i = 0; i < path.length; i++) {
+                const step = path[i];
+                const node = nodeMap.get(step.nid)!;
+                if (node.isFixed && node.currentChar !== wordText[i]) return false;
+              }
+              return true;
+            });
+
+            if (candidates.length !== 1) {
+              log(`[GroupSolve] ★単語 [${wNum}] は経路が1つですが、適合するリスト2の単語が ${candidates.length} 個（"${candidates.join(", ")}"）あるため、このグループの確定を保留します。`);
+              groupValid = false;
               break;
+            } else {
+              starAss.set(wNum, candidates[0]);
             }
-            const node = nodeMap.get(step.nid)!;
-            if (node.isFixed && node.currentChar !== step.char) {
-              hasConflict = true;
-              break;
+          }
+        }
+
+        if (groupValid) {
+          groupsToApply.push({ pat, starAss });
+        }
+      }
+
+      if (groupsToApply.length > 0) {
+        let hasConflict = false;
+        const tempUsedCells = new Map<string, string>();
+        
+        for (const { pat, starAss } of groupsToApply) {
+          for (const [wNum, path] of pat.assignments.entries()) {
+            const wordText = starAss.get(wNum) || solverWords.find(sw => sw.logiNumber === wNum)!.text;
+            for (let i = 0; i < path.length; i++) {
+              const step = path[i];
+              const char = wordText[i];
+              if (tempUsedCells.has(step.nid) && tempUsedCells.get(step.nid) !== char) {
+                hasConflict = true;
+                break;
+              }
+              const node = nodeMap.get(step.nid)!;
+              if (node.isFixed && node.currentChar !== char) {
+                hasConflict = true;
+                break;
+              }
+              tempUsedCells.set(step.nid, char);
             }
-            tempUsedCells.set(step.nid, step.char);
+            if (hasConflict) break;
           }
           if (hasConflict) break;
         }
-        if (hasConflict) break;
-      }
 
-      if (hasConflict) {
-        log(`[GroupSolve] パターン数1のグループ同士、または既定の文字と衝突が発生しました。`);
-        return false; // 矛盾
-      }
-
-      let appliedAny = false;
-      for (const { pat } of singlePatternGroups) {
-        for (const [wNum, path] of pat.assignments.entries()) {
-          const word = solverWords.find(sw => sw.logiNumber === wNum)!;
-          const fixedLen = getFixedLength(word);
-          for (let i = 0; i < path.length; i++) {
-            const step = path[i];
-            const node = nodeMap.get(step.nid)!;
-            fixNode(node, step.char);
-            word.fixedNodeIDs[fixedLen + i + 1] = step.nid;
-            if (fixedLen === 0 && i === 0) {
-              node.logiNumber = wNum;
-            }
-          }
-          word.isUsed = true;
-          appliedAny = true;
-          log(`[GroupSolve] グループの唯一のパターンを確定適用しました: 単語 [${wNum}]`);
+        if (hasConflict) {
+          log(`[GroupSolve] パターン数1のグループ同士、または既定 of 文字と衝突が発生しました。`);
+          return false; // 矛盾
         }
-      }
 
-      if (appliedAny) {
-        await reportStep();
-        log(`[GroupSolve] パターン数1のグループ確定を適用したため、再度グループ洗い出しをやり直します。`);
-        continue; // while(true) の先頭へ戻ってやり直す
+        let appliedAny = false;
+        for (const { pat, starAss } of groupsToApply) {
+          for (const [wNum, path] of pat.assignments.entries()) {
+            const word = solverWords.find(sw => sw.logiNumber === wNum)!;
+            
+            if (starAss.has(wNum)) {
+              const matchedWord = starAss.get(wNum)!;
+              word.text = matchedWord;
+              word.length = matchedWord.length;
+              word.fixedNodeIDs = new Array(matchedWord.length + 1).fill(null);
+              word.fixedNodeIDs[1] = path[0].nid;
+              
+              if (starContext) {
+                starContext.unusedList2Words = starContext.unusedList2Words.filter(w => w !== matchedWord);
+                starContext.unassignedStarLogiNums.delete(wNum);
+              }
+              log(`[GroupSolve] ★単語 [${wNum}] の割り当てを「${matchedWord}」に確定しました。`);
+            }
+
+            const fixedLen = getFixedLength(word);
+            for (let i = 0; i < path.length; i++) {
+              const step = path[i];
+              const node = nodeMap.get(step.nid)!;
+              const correctChar = word.text[fixedLen + i];
+              fixNode(node, correctChar);
+              word.fixedNodeIDs[fixedLen + i + 1] = step.nid;
+              if (fixedLen === 0 && i === 0) {
+                node.logiNumber = wNum;
+              }
+            }
+            word.isUsed = true;
+            appliedAny = true;
+            log(`[GroupSolve] グループの唯一のパターンを確定適用しました: 単語 [${wNum}] ("${word.text}")`);
+          }
+        }
+
+        if (appliedAny) {
+          await reportStep();
+          log(`[GroupSolve] パターン数1のグループ確定を適用したため、再度グループ洗い出しをやり直します。`);
+          continue; // while(true) の先頭へ戻ってやり直す
+        }
       }
     }
 
@@ -2569,9 +2631,18 @@ export async function solveZigzagAsync(
 
   const runBacktrackWithPermutations = async (): Promise<boolean> => {
     const unassignedStars = solverWords.filter(w => puzzle.wordStarList?.[w.logiNumber] && w.text === "");
+    const list2Words = (puzzle.wordList2 || []).filter(w => w.trim() !== '');
+    const assignedWords = new Set(solverWords.map(sw => sw.text).filter(t => t !== ""));
+    const unusedList2Words = list2Words.filter(w => !assignedWords.has(w));
+
+    const starContext = {
+      unassignedStarLogiNums: new Set(unassignedStars.map(sw => sw.logiNumber)),
+      unusedList2Words: [...unusedList2Words]
+    };
+
     if (unassignedStars.length === 0) {
       try {
-        return await solveWithGroups();
+        return await solveWithGroups(starContext);
       } catch (e: any) {
         if (e.message === "cancelled") throw e;
         let reason = e.message;
@@ -2585,10 +2656,6 @@ export async function solveZigzagAsync(
         return await solveByBacktracking();
       }
     }
-
-    const list2Words = (puzzle.wordList2 || []).filter(w => w.trim() !== '');
-    const assignedWords = new Set(solverWords.map(sw => sw.text).filter(t => t !== ""));
-    const unusedList2Words = list2Words.filter(w => !assignedWords.has(w));
 
     log(`[Backtrack] 未割り当ての★番号が ${unassignedStars.length} 個あります。候補単語の総当たりを試みます。`);
 
@@ -2634,7 +2701,7 @@ export async function solveZigzagAsync(
       // 探索実行
       let success = false;
       try {
-        success = await solveWithGroups();
+        success = await solveWithGroups(starContext);
       } catch (e: any) {
         if (e.message === "cancelled") throw e;
         let reason = e.message;
