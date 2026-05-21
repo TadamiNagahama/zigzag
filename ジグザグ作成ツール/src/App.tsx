@@ -452,8 +452,8 @@ function App() {
     return matches;
   }, [puzzle.cells, puzzle.wordList, puzzle.width, puzzle.height, appMode]);
 
-  const getDrawnCellsForWord = useCallback((num: number): { x: number, y: number }[] => {
-    const word = puzzle.wordList[num];
+  const getDrawnCellsForWord = useCallback((num: number, overrideWord?: string): { x: number, y: number }[] => {
+    const word = overrideWord !== undefined ? overrideWord : puzzle.wordList[num];
     if (!word) return [];
 
     let startX = -1, startY = -1;
@@ -540,15 +540,71 @@ function App() {
 
   const completedWords = useMemo(() => {
     const completed = new Set<number>();
-    Object.keys(puzzle.wordList).forEach(numStr => {
-      const num = parseInt(numStr, 10);
-      const word = puzzle.wordList[num];
-      if (word && word.length > 0 && getDrawnCellsForWord(num).length === word.length) {
-        completed.add(num);
+    
+    // 通常の単語と★の単語のすべての番号を集約
+    const allNums = new Set<number>();
+    Object.keys(puzzle.wordList).forEach(k => allNums.add(parseInt(k, 10)));
+    if (puzzle.wordStarList) {
+      Object.keys(puzzle.wordStarList).forEach(k => {
+        const num = parseInt(k, 10);
+        if (puzzle.wordStarList?.[num]) {
+          allNums.add(num);
+        }
+      });
+    }
+
+    allNums.forEach(num => {
+      if (!puzzle.wordStarList?.[num]) {
+        const word = puzzle.wordList[num];
+        if (word && word.length > 0 && getDrawnCellsForWord(num).length === word.length) {
+          completed.add(num);
+        }
+      } else {
+        if (puzzle.wordList2) {
+          const list2Words = puzzle.wordList2.map(w => w.trim()).filter(w => w !== '');
+          const isStarCompleted = list2Words.some(word => {
+            if (word.length === 0) return false;
+            return getDrawnCellsForWord(num, word).length === word.length;
+          });
+          if (isStarCompleted) {
+            completed.add(num);
+          }
+        }
       }
     });
     return completed;
-  }, [puzzle.wordList, getDrawnCellsForWord]);
+  }, [puzzle.wordList, puzzle.wordStarList, puzzle.wordList2, getDrawnCellsForWord]);
+
+  const completedWord2Indices = useMemo(() => {
+    const completedIndices = new Set<number>();
+    if (!puzzle.isWListStar || !puzzle.wordList2) return completedIndices;
+
+    const list2Words = puzzle.wordList2.map(w => w.trim()).filter(w => w !== '');
+    
+    // ★の単語番号を正しく抽出
+    const starNums: number[] = [];
+    if (puzzle.wordStarList) {
+      Object.keys(puzzle.wordStarList).forEach(k => {
+        const num = parseInt(k, 10);
+        if (puzzle.wordStarList?.[num]) {
+          starNums.push(num);
+        }
+      });
+    }
+
+    starNums.forEach(num => {
+      list2Words.forEach((word, idx) => {
+        if (word.length > 0) {
+          const path = getDrawnCellsForWord(num, word);
+          if (path.length === word.length) {
+            completedIndices.add(idx);
+          }
+        }
+      });
+    });
+
+    return completedIndices;
+  }, [puzzle.isWListStar, puzzle.wordList2, puzzle.wordList, puzzle.wordStarList, getDrawnCellsForWord]);
 
   // 全単語が埋まったときのメッセージ
   const prevCompletedCountRef = useRef(0);
@@ -1316,12 +1372,13 @@ function App() {
     // 制限チェック
     const currentType = puzzle.puzzleType || 'ノーマル';
     
-    // 現在対応しているのは「ノーマル（通常）」「矢印」「超（網掛けあり）＋ノーマル」のみ
-    // Wリストなどは未対応
+    // 現在対応しているのは「ノーマル（通常）」「矢印」「Wリスト★」「超（網掛けあり）＋ノーマル」のみ
     let isSupportedType = false;
     if (currentType === 'ノーマル' || currentType === '通常') {
       isSupportedType = true; // ノーマル、および 超＋ノーマル
     } else if (currentType === '矢印') {
+      isSupportedType = true;
+    } else if (currentType === 'Wリスト★') {
       isSupportedType = true;
     }
 
@@ -2298,7 +2355,9 @@ function App() {
                                 cursor: 'grab',
                                 padding: '4px',
                                 borderRadius: '4px',
-                                backgroundColor: draggedWord2Index === idx ? 'var(--bg-secondary)' : 'transparent',
+                                backgroundColor: draggedWord2Index === idx 
+                                  ? 'var(--bg-secondary)' 
+                                  : (completedWord2Indices.has(idx) ? '#e2e8f0' : 'transparent'),
                                 transition: 'background-color 0.2s'
                               }}
                             >
@@ -2310,7 +2369,12 @@ function App() {
                                 value={word}
                                 onChange={(e) => updateWordList2(idx, e.target.value)}
                                 className="input-field"
-                                style={{ padding: '6px 10px', fontSize: '0.9rem', flex: 1 }}
+                                style={{ 
+                                  padding: '6px 10px', 
+                                  fontSize: '0.9rem', 
+                                  flex: 1,
+                                  backgroundColor: completedWord2Indices.has(idx) ? 'transparent' : 'white'
+                                }}
                                 placeholder={`${idx + 1}. 単語を入力...`}
                                 onKeyDown={(e) => {
                                   if (e.key === 'Enter') {
@@ -2765,7 +2829,7 @@ function App() {
           )}
 
           {isSolving && (
-            <div className="modal-overlay" style={{ zIndex: 4000 }}>
+            <div className="modal-overlay" style={{ zIndex: 4000, backdropFilter: 'blur(1px)', backgroundColor: 'rgba(0, 0, 0, 0.15)' }}>
               <div className="modal-content glass card" style={{ width: '400px', textAlign: 'center', padding: '32px' }}>
                 <h3 style={{ color: 'var(--text-color)', marginBottom: '16px' }}>自動解答中</h3>
                 <div style={{ marginBottom: '24px', lineHeight: '1.6', fontSize: '0.95rem' }}>
