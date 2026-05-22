@@ -595,6 +595,92 @@ export async function solveZigzagAsync(
     return dfsAssign(0);
   };
 
+  // 指定された単語が、指定された文字位置で網掛けブロックに（他の文字と矛盾なく）収まるかを判定する
+  const canWordFitAtShadedNode = (
+    blockNodeIds: Set<string>,
+    word: string,
+    charIdxInWord: number,
+    startNode: SolverNode,
+    gridChars: Record<string, string>
+  ): boolean => {
+    const startNodeChar = gridChars[startNode.id];
+    if (startNodeChar && startNodeChar !== word[charIdxInWord]) {
+      return false;
+    }
+
+    const visited = new Set<string>([startNode.id]);
+
+    // 左側（逆方向）のパスを探索
+    const leftPaths: string[][] = [];
+    const findLeftPaths = (currId: string, idx: number, path: string[]) => {
+      if (idx < 0) {
+        leftPaths.push([...path]);
+        return;
+      }
+      const currNode = nodeMap.get(currId)!;
+      const targetChar = word[idx];
+      for (const neighborId of currNode.neighbors) {
+        if (blockNodeIds.has(neighborId) && !visited.has(neighborId)) {
+          const nGChar = gridChars[neighborId];
+          if (nGChar && nGChar !== targetChar) continue;
+          
+          visited.add(neighborId);
+          path.push(neighborId);
+          findLeftPaths(neighborId, idx - 1, path);
+          path.pop();
+          visited.delete(neighborId);
+        }
+      }
+    };
+
+    findLeftPaths(startNode.id, charIdxInWord - 1, []);
+
+    if (leftPaths.length === 0 && charIdxInWord > 0) {
+      return false;
+    }
+
+    const actualLeftPaths = charIdxInWord === 0 ? [[]] : leftPaths;
+
+    for (const leftPath of actualLeftPaths) {
+      const currentVisited = new Set<string>([startNode.id]);
+      for (const nid of leftPath) {
+        currentVisited.add(nid);
+      }
+
+      let rightSuccess = false;
+      const findRightPath = (currId: string, idx: number): boolean => {
+        if (idx === word.length) {
+          rightSuccess = true;
+          return true;
+        }
+        const currNode = nodeMap.get(currId)!;
+        const targetChar = word[idx];
+        for (const neighborId of currNode.neighbors) {
+          if (blockNodeIds.has(neighborId) && !currentVisited.has(neighborId)) {
+            const nGChar = gridChars[neighborId];
+            if (nGChar && nGChar !== targetChar) continue;
+
+            currentVisited.add(neighborId);
+            if (findRightPath(neighborId, idx + 1)) return true;
+            currentVisited.delete(neighborId);
+          }
+        }
+        return false;
+      };
+
+      if (charIdxInWord === word.length - 1) {
+        return true;
+      }
+
+      findRightPath(startNode.id, charIdxInWord + 1);
+      if (rightSuccess) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
   const canNodeAcceptChar = (node: SolverNode, char: string): boolean => {
     if (node.isFixed) {
       return node.currentChar === char;
@@ -621,32 +707,23 @@ export async function solveZigzagAsync(
           }
           gridChars[node.id] = char;
 
-          const candidateWords = list2Words.filter(w => w.length <= block.nodes.length);
+          // 候補となる単語（その文字を含み、かつブロックサイズ以下の長さのもの）
+          const candidateWords = list2Words.filter(w => w.includes(char) && w.length <= block.nodes.length);
           let canFit = false;
+          const blockNodeIds = block.nodeIds;
 
-          const checkCombinations = (startIdx: number, selected: string[], currentLenSum: number, hasCharWord: boolean): boolean => {
-            if (currentLenSum >= block.nodes.length) {
-              if (hasCharWord && canAssignWordsToBlock(block.nodes, selected, gridChars)) {
-                return true;
+          for (const w of candidateWords) {
+            let pos = w.indexOf(char);
+            while (pos !== -1) {
+              if (canWordFitAtShadedNode(blockNodeIds, w, pos, node, gridChars)) {
+                canFit = true;
+                break;
               }
-              if (currentLenSum > block.nodes.length + 3) {
-                return false;
-              }
+              pos = w.indexOf(char, pos + 1);
             }
+            if (canFit) break;
+          }
 
-            for (let i = startIdx; i < candidateWords.length; i++) {
-              const w = candidateWords[i];
-              selected.push(w);
-              const nextHasChar = hasCharWord || w.includes(char);
-              if (checkCombinations(i + 1, selected, currentLenSum + w.length, nextHasChar)) {
-                return true;
-              }
-              selected.pop();
-            }
-            return false;
-          };
-
-          canFit = checkCombinations(0, [], 0, false);
           if (!canFit) {
             return false;
           }
