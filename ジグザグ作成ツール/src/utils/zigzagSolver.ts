@@ -129,10 +129,107 @@ export async function solveZigzagAsync(
     log("超モードを検出しました。網掛けの下の数字を隠蔽して推論を開始します。");
   }
 
+  const isIrregularMode = puzzle.puzzleType === '変則';
+
+  // 変則モード用の共有マス計算ロジック（解法で必要になるため）
+  const getIrregularSharedCells = (): Record<string, number[]> => {
+    if (!isIrregularMode) return {};
+    const sharedCellsMap: Record<string, number[]> = {};
+    const usedNumbers = new Set<number>();
+    
+    puzzle.cells.forEach(row => row.forEach(cell => {
+      if (cell.number !== null) usedNumbers.add(cell.number);
+    }));
+
+    const findAllPaths = (word: string, x: number, y: number, visited: Set<string>, currentPath: { x: number, y: number }[]): { x: number, y: number }[][] => {
+      if (x < 0 || x >= width || y < 0 || y >= height) return [];
+      const cell = puzzle.cells[y][x];
+      const px = cell.mergedParent ? cell.mergedParent.x : x;
+      const py = cell.mergedParent ? cell.mergedParent.y : y;
+      const parentCell = puzzle.cells[py][px];
+      if (parentCell.type !== 'normal') return [];
+      const currentChar = parentCell.char || parentCell.answerChar;
+      if (currentChar !== word[0]) return [];
+      const key = `${px},${py}`;
+      if (visited.has(key)) return [];
+      const newPath = [...currentPath, { x: px, y: py }];
+      if (word.length === 1) return [newPath];
+      const newVisited = new Set(visited);
+      newVisited.add(key);
+      const res: { x: number, y: number }[][] = [];
+      const groupCells: { x: number, y: number }[] = [];
+      if (parentCell.mergedSize) {
+        for (let dy = 0; dy < parentCell.mergedSize.height; dy++) {
+          for (let dx = 0; dx < parentCell.mergedSize.width; dx++) {
+            groupCells.push({ x: px + dx, y: py + dy });
+          }
+        }
+      } else {
+        groupCells.push({ x: px, y: py });
+      }
+      const neighbors = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+      for (const gc of groupCells) {
+        for (const [dx, dy] of neighbors) {
+          const nx = gc.x + dx;
+          const ny = gc.y + dy;
+          if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+          const nCell = puzzle.cells[ny][nx];
+          if (nCell.type !== 'normal') continue;
+          const npx = nCell.mergedParent ? nCell.mergedParent.x : nx;
+          const npy = nCell.mergedParent ? nCell.mergedParent.y : ny;
+          if (npx === px && npy === py) continue;
+          const sub = findAllPaths(word.slice(1), nx, ny, newVisited, newPath);
+          res.push(...sub);
+          if (res.length >= 2) break;
+        }
+        if (res.length >= 2) break;
+      }
+      return res;
+    };
+
+    for (const num of Array.from(usedNumbers).sort((a, b) => a - b)) {
+      const word = puzzle.wordList[num];
+      if (!word || word.trim() === '') continue;
+      let startPos: { x: number, y: number } | null = null;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          if (puzzle.cells[y][x].number === num) {
+            startPos = { x, y };
+            break;
+          }
+        }
+        if (startPos) break;
+      }
+      if (!startPos) continue;
+      const paths = findAllPaths(word, startPos.x, startPos.y, new Set(), []);
+      if (paths.length === 1) {
+        paths[0].forEach(pCoord => {
+          const k = `${pCoord.x},${pCoord.y}`;
+          if (!sharedCellsMap[k]) sharedCellsMap[k] = [];
+          if (!sharedCellsMap[k].includes(num)) sharedCellsMap[k].push(num);
+        });
+      }
+    }
+
+    const finalSharedCells: Record<string, number[]> = {};
+    Object.entries(sharedCellsMap).forEach(([k, nums]) => {
+      if (nums.length >= 2) {
+        finalSharedCells[k] = nums.sort((a, b) => a - b);
+      }
+    });
+    return finalSharedCells;
+  };
+
+  const sharedCells = getIrregularSharedCells();
+
   // 現在の状態をコピーして保持
   // 超モード（網掛け）かつ未開示の場合、原稿の数字と文字を消去してカンニングを防止する
+  // 変則モードの場合、開始数字（1文字目の数字）は最初はすべて非公開にする
   const currentCells = cells.map(row => row.map(c => {
     if (isChoMode && c.isShaded && !c.isRevealed) {
+      return { ...c, number: null, char: '' };
+    }
+    if (isIrregularMode) {
       return { ...c, number: null, char: '' };
     }
     return { ...c };
@@ -285,23 +382,38 @@ export async function solveZigzagAsync(
       const hasInitialChar = cell.answerChar !== '';
       const isInitiallyRevealed = cell.isRevealed;
 
+      let isFixed = false;
+      let currentChar = '';
+      let logiNumber: number | null = null;
+
+      if (isIrregularMode) {
+        const playerChar = cell.answerChar || cell.char;
+        if (playerChar !== '') {
+          isFixed = true;
+          currentChar = playerChar;
+        }
+        logiNumber = null;
+      } else {
+        isFixed = isActuallyShaded 
+          ? (hasInitialChar || !!isInitiallyRevealed) 
+          : (cell.char !== '' || (cell.number !== null && !(puzzle.isWListStar && puzzle.wordStarList?.[cell.number])));
+        currentChar = isActuallyShaded ? (hasInitialChar ? cell.answerChar : '') : cell.char;
+        logiNumber = isActuallyShaded ? (isInitiallyRevealed ? cell.number : null) : cell.number;
+      }
+
       const node: SolverNode = {
         id,
         x,
         y,
-        // 網掛けマスでも、既に入力があれば固定
-        // Wリスト★の未確定★マス（文字未入力かつ★指定あり）は、数字があっても isFixed: false とする
-        isFixed: isActuallyShaded 
-          ? (hasInitialChar || !!isInitiallyRevealed) 
-          : (cell.char !== '' || (cell.number !== null && !(puzzle.isWListStar && puzzle.wordStarList?.[cell.number]))),
-        currentChar: isActuallyShaded ? (hasInitialChar ? cell.answerChar : '') : cell.char,
-        logiNumber: isActuallyShaded ? (isInitiallyRevealed ? cell.number : null) : cell.number,
+        isFixed,
+        currentChar,
+        logiNumber,
         neighbors: [],
         reservedBy: new Set(),
         reservedChars: new Set(),
         candidates: new Set(),
-        numberCandidates: isActuallyShaded ? new Set() : undefined,
-        hiddenCorrectNumber: isActuallyShaded ? cell.number : undefined,
+        numberCandidates: (isActuallyShaded || isIrregularMode) ? new Set() : undefined,
+        hiddenCorrectNumber: (isActuallyShaded || isIrregularMode) ? cell.number : undefined,
       };
       nodeMap.set(id, node);
     }
@@ -986,6 +1098,82 @@ export async function solveZigzagAsync(
               dfsStar(startId, 1);
             }
           }
+        }
+        continue;
+      }
+
+      if (isIrregularMode && getFixedLength(w) === 0) {
+        const candidatesByPos: Map<number, Set<string>> = new Map();
+        wordCharCandidates.set(w.logiNumber, candidatesByPos);
+
+        const allowedStarts = getAllowedStartNodes();
+        const startNodes = allowedStarts.get(w.logiNumber) || [];
+
+        const fixedNodesWithChars = Array.from(nodeMap.values()).filter(n => n.isFixed && w.text.includes(n.currentChar));
+
+        const filteredStartNodes = startNodes.filter(startNode => {
+          return fixedNodesWithChars.every(fixedNode => {
+            const idxs = [];
+            let pos = w.text.indexOf(fixedNode.currentChar);
+            while (pos !== -1) {
+              idxs.push(pos);
+              pos = w.text.indexOf(fixedNode.currentChar, pos + 1);
+            }
+            const dist = Math.abs(startNode.x - fixedNode.x) + Math.abs(startNode.y - fixedNode.y);
+            return idxs.some(idx => dist <= idx);
+          });
+        });
+
+        for (const startNode of filteredStartNodes) {
+          if (startNode.isFixed && startNode.currentChar !== w.text[0]) continue;
+
+          const used = new Set<string>();
+          used.add(startNode.id);
+
+          const pathNodes: string[] = [startNode.id];
+          let dfsCalls = 0;
+          let overflow = false;
+
+          const dfsIrregular = (currId: string, charIdx: number) => {
+            if (overflow) return;
+            dfsCalls++;
+            if (dfsCalls > 1000) {
+              overflow = true;
+              return;
+            }
+
+            if (charIdx === w.length) {
+              for (let i = 0; i < w.length; i++) {
+                const nid = pathNodes[i];
+                const targetChar = w.text[i];
+                if (!candidatesByPos.has(i)) candidatesByPos.set(i, new Set());
+                candidatesByPos.get(i)!.add(nid);
+
+                if (!nodeCharUsage.has(nid)) nodeCharUsage.set(nid, new Map());
+                const charMap = nodeCharUsage.get(nid)!;
+                if (!charMap.has(targetChar)) charMap.set(targetChar, new Set());
+                charMap.get(targetChar)!.add(w.logiNumber);
+              }
+              return;
+            }
+
+            const currNode = nodeMap.get(currId)!;
+            const targetChar = w.text[charIdx];
+
+            for (const nid of currNode.neighbors) {
+              if (used.has(nid)) continue;
+              const nb = nodeMap.get(nid)!;
+              if (canNodeAcceptChar(nb, targetChar)) {
+                used.add(nid);
+                pathNodes.push(nid);
+                dfsIrregular(nid, charIdx + 1);
+                pathNodes.pop();
+                used.delete(nid);
+              }
+            }
+          };
+
+          dfsIrregular(startNode.id, 1);
         }
         continue;
       }
@@ -1732,15 +1920,19 @@ export async function solveZigzagAsync(
     return changed;
   };
 
-  const getChoAllowedStartNodes = (): Map<number, SolverNode[]> => {
+  const getAllowedStartNodes = (): Map<number, SolverNode[]> => {
     const allowedStartNodesForWord = new Map<number, SolverNode[]>();
-    if (!isChoMode) return allowedStartNodesForWord;
+    if (!isChoMode && !isIrregularMode) return allowedStartNodesForWord;
 
     const scanNodes: SolverNode[] = [];
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const cell = cells[y][x];
-        if ((cell.number !== null && !cell.isShaded) || cell.isShaded) {
+        const isScanTarget = isChoMode 
+          ? ((cell.number !== null && !cell.isShaded) || cell.isShaded)
+          : (cell.type === 'normal');
+        
+        if (isScanTarget) {
           const node = nodeMap.get(`${x},${y}`);
           if (node) scanNodes.push(node);
         }
@@ -1808,7 +2000,7 @@ export async function solveZigzagAsync(
     const targetWords = solverWords.filter(w => w.fixedNodeIDs[1] === null);
     if (targetWords.length === 0) return false;
 
-    const allowedStartNodesForWord = getChoAllowedStartNodes();
+    const allowedStartNodesForWord = getAllowedStartNodes();
 
     for (const w of targetWords) {
       if (checkCancelled && checkCancelled()) {
@@ -1946,6 +2138,147 @@ export async function solveZigzagAsync(
           changed = true;
           break; // 他の単語に影響を与えるため一度ブレイクして再計算
         }
+      }
+    }
+
+    if (changed) await reportStep();
+    return changed;
+  };
+
+  /**
+   * 変則モード用推論 1: 共有マスから一意な文字を確定させる
+   */
+  const solveIrregularSharedChars = async (): Promise<boolean> => {
+    if (!isIrregularMode) return false;
+    let changed = false;
+
+    for (const [nid, wordNums] of Object.entries(sharedCells)) {
+      const node = nodeMap.get(nid);
+      if (!node || node.isFixed) continue;
+
+      let commonChars: Set<string> | null = null;
+      for (const num of wordNums) {
+        const word = solverWords.find(sw => sw.logiNumber === num);
+        if (!word || word.text === "") continue;
+
+        const chars = new Set(word.text.split(""));
+        if (commonChars === null) {
+          commonChars = chars;
+        } else {
+          for (const c of Array.from(commonChars)) {
+            if (!chars.has(c)) {
+              commonChars.delete(c);
+            }
+          }
+        }
+      }
+
+      if (commonChars && commonChars.size === 1) {
+        const char = Array.from(commonChars)[0];
+        log(`[変則文字確定] 変則数字マス ${getExcelCoords(node)} (${wordNums.join('・')}) は共通文字 '${char}' で確定しました`);
+        fixNode(node, char);
+        await reportStep();
+        changed = true;
+      }
+    }
+
+    return changed;
+  };
+
+  /**
+   * 変則モード用推論 2: 候補位置から開始位置（1文字目）を特定する
+   */
+  const solveIrregularStartsByDistance = async (): Promise<boolean> => {
+    if (!isIrregularMode) return false;
+    let changed = false;
+
+    const targetWords = solverWords.filter(w => !w.isUsed && w.fixedNodeIDs[1] === null);
+    if (targetWords.length === 0) return false;
+
+    for (const w of targetWords) {
+      const cands = wordCharCandidates.get(w.logiNumber);
+      if (!cands) continue;
+
+      const startCands = cands.get(0);
+      if (startCands && startCands.size === 1) {
+        const startId = Array.from(startCands)[0];
+        const startNode = nodeMap.get(startId)!;
+        
+        log(`[変則開始位置特定] 単語 [${w.logiNumber}] "${w.text}" の開始位置を唯一の候補 ${getExcelCoords(startNode)} と特定しました`);
+        
+        startNode.logiNumber = w.logiNumber;
+        w.fixedNodeIDs[1] = startId;
+        if (!startNode.currentChar && w.text !== "") {
+          fixNode(startNode, w.text[0]);
+        }
+        
+        await reportStep();
+        changed = true;
+        break;
+      }
+    }
+
+    return changed;
+  };
+
+  /**
+   * 変則モード用推論 3: 確定している開始マスの「隙間」から番号を地理的特定する
+   */
+  const solveIrregularNumberPlacement = async (): Promise<boolean> => {
+    if (!isIrregularMode) return false;
+    let changed = false;
+
+    const candidateNodes: SolverNode[] = [];
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const node = nodeMap.get(`${x},${y}`);
+        if (node) candidateNodes.push(node);
+      }
+    }
+
+    const allWordNumbers = Object.keys(wordList).map(n => parseInt(n, 10)).sort((a, b) => a - b);
+    if (allWordNumbers.length === 0) return false;
+
+    const posToNumber = new Array(candidateNodes.length).fill(null);
+    candidateNodes.forEach((node, idx) => {
+      if (node.logiNumber !== null) {
+        posToNumber[idx] = node.logiNumber;
+      }
+    });
+
+    let lastFoundIdx = -1;
+    let lastFoundNum = 0;
+
+    for (let i = 0; i <= candidateNodes.length; i++) {
+      const isEnd = i === candidateNodes.length;
+      const currentNum = isEnd ? allWordNumbers[allWordNumbers.length - 1] + 1 : posToNumber[i];
+
+      if (currentNum !== null) {
+        const gapSize = i - lastFoundIdx - 1;
+        const missingNumsCount = currentNum - lastFoundNum - 1;
+
+        if (gapSize > 0 && missingNumsCount > 0) {
+          if (gapSize === missingNumsCount) {
+            for (let k = 1; k <= gapSize; k++) {
+              const targetNode = candidateNodes[lastFoundIdx + k];
+              const targetNum = lastFoundNum + k;
+              if (targetNode.logiNumber === null) {
+                log(`[変則番号位置推論] ${targetNum}番は ${getExcelCoords(targetNode)} に入ると推論しました（連続番号の隙間の数とマスの数が一致）`);
+                targetNode.logiNumber = targetNum;
+                const word = solverWords.find(sw => sw.logiNumber === targetNum);
+                if (word) {
+                  word.fixedNodeIDs[1] = targetNode.id;
+                  if (!targetNode.currentChar) {
+                    fixNode(targetNode, word.text[0]);
+                  }
+                }
+                changed = true;
+              }
+            }
+          }
+        }
+        lastFoundIdx = i;
+        lastFoundNum = currentNum;
       }
     }
 
@@ -2250,7 +2583,7 @@ export async function solveZigzagAsync(
 
       log(`[GroupSolve] グループ総当たりを開始します... (対象単語数: ${remainingWords.length})`);
     
-    const allowedChoStarts = getChoAllowedStartNodes();
+    const allowedStarts = getAllowedStartNodes();
     const wordPaths = new Map<number, {nid: string, char: string}[][]>();
     for (const w of remainingWords) {
       if (checkCancelled && checkCancelled()) {
@@ -2291,7 +2624,7 @@ export async function solveZigzagAsync(
       } else {
         const fixedLen = getFixedLength(w);
         if (fixedLen === 0) {
-          const overrideNodes = allowedChoStarts.get(w.logiNumber) || [];
+          const overrideNodes = allowedStarts.get(w.logiNumber) || [];
           paths = getAllValidPathsForBacktrack(w, overrideNodes);
         } else {
           paths = getAllValidPathsForBacktrack(w);
@@ -2893,7 +3226,7 @@ export async function solveZigzagAsync(
 
     await collectWordCandidates();
 
-    const allowedChoStarts = getChoAllowedStartNodes();
+    const allowedStarts = getAllowedStartNodes();
     const wordPaths = new Map<number, {nid: string, char: string}[][]>();
     const wordScores = new Map<number, number>();
 
@@ -2908,7 +3241,7 @@ export async function solveZigzagAsync(
       let paths: {nid: string, char: string}[][] = [];
 
       if (fixedLen === 0) {
-        const overrideNodes = allowedChoStarts.get(w.logiNumber) || [];
+        const overrideNodes = allowedStarts.get(w.logiNumber) || [];
         if (overrideNodes.length === 0) {
           log(`[Backtrack] 単語 [${w.logiNumber}] の開始候補マスが見つからないため断念します。`);
           return false;
@@ -3104,6 +3437,25 @@ export async function solveZigzagAsync(
       }
     }
 
+    // 変則モードの場合、数字や共有文字の特定を試みる
+    if (isIrregularMode) {
+      if (await solveIrregularSharedChars()) {
+        totalChanged = true;
+        await collectWordCandidates();
+        continue;
+      }
+      if (await solveIrregularStartsByDistance()) {
+        totalChanged = true;
+        await collectWordCandidates();
+        continue;
+      }
+      if (await solveIrregularNumberPlacement()) {
+        totalChanged = true;
+        await collectWordCandidates();
+        continue;
+      }
+    }
+
     // 候補情報の更新
     await collectWordCandidates();
 
@@ -3164,7 +3516,7 @@ export async function solveZigzagAsync(
 
     // 事前矛盾検知: テキスト確定済みの単語の可能経路が最初から0のものがあれば、探索を即座に中止する
     if (puzzle.isWListStar) {
-      const allowedChoStarts = getChoAllowedStartNodes();
+      const allowedStarts = getAllowedStartNodes();
       for (const w of solverWords) {
         if (w.isUsed) continue;
         if (puzzle.wordStarList?.[w.logiNumber] && w.text === "") continue;
@@ -3172,7 +3524,7 @@ export async function solveZigzagAsync(
         const fixedLen = getFixedLength(w);
         let paths: {nid: string, char: string}[][] = [];
         if (fixedLen === 0) {
-          const overrideNodes = allowedChoStarts.get(w.logiNumber) || [];
+          const overrideNodes = allowedStarts.get(w.logiNumber) || [];
           paths = getAllValidPathsForBacktrack(w, overrideNodes);
         } else {
           paths = getAllValidPathsForBacktrack(w);

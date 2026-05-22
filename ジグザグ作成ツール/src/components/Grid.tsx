@@ -190,31 +190,39 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown,
                   color: 'var(--text-main)',
                   fontWeight: 'bold',
                   zIndex: 3,
-                  display: ((appMode === 'shade' && cell.isShaded) || isNumbersHidden || isIrregularNumbersDisplay || (appMode === 'answer' && isSolving && cell.isShaded && !cell.isRevealed)) ? 'none' : 'block'
+                  // 変則モード時でも数字があれば表示する（isIrregularNumbersDisplay 条件を除外）
+                  display: ((appMode === 'shade' && cell.isShaded) || isNumbersHidden || (appMode === 'answer' && isSolving && cell.isShaded && !cell.isRevealed)) ? 'none' : 'block'
                 }}>
                   {cell.number}
                 </span>
               )}
 
               {/* Layer 3.5: 変則モードの共有数字 */}
-              {isIrregularNumbersDisplay && sharedCells[`${cell.x},${cell.y}`] && (
-                <div style={{
-                  position: 'absolute',
-                  top: '1px',
-                  left: '1px',
-                  fontSize: `${cellSize * 0.3}px`,
-                  lineHeight: '1',
-                  color: 'var(--text-main)',
-                  fontWeight: 'bold',
-                  zIndex: 4,
-                  pointerEvents: 'none',
-                  wordBreak: 'break-all',
-                  maxWidth: '100%',
-                  display: (appMode === 'answer' && isSolving && cell.isShaded && !cell.isRevealed) ? 'none' : 'block'
-                }}>
-                  {sharedCells[`${cell.x},${cell.y}`].join('・')}
-                </div>
-              )}
+              {isIrregularNumbersDisplay && sharedCells[`${cell.x},${cell.y}`] && !cell.number && (() => {
+                const hasChar = !!(cell.answerChar || cell.char);
+                return (
+                  <div style={{
+                    position: 'absolute',
+                    top: '1px',
+                    // 文字が決まっていれば右上寄せ、未定なら左上寄せ
+                    right: hasChar ? '1px' : 'auto',
+                    left: hasChar ? 'auto' : '1px',
+                    // 文字が決まっていれば70%に縮小、未定なら標準サイズ
+                    fontSize: hasChar ? `${cellSize * 0.3 * 0.7}px` : `${cellSize * 0.3}px`,
+                    lineHeight: '1',
+                    // 文字が決まっていればグレー、未定なら標準色
+                    color: hasChar ? '#9ca3af' : 'var(--text-main)',
+                    fontWeight: 'bold',
+                    zIndex: 4,
+                    pointerEvents: 'none',
+                    wordBreak: 'break-all',
+                    maxWidth: '100%',
+                    display: (appMode === 'answer' && isSolving && cell.isShaded && !cell.isRevealed) ? 'none' : 'block'
+                  }}>
+                    {sharedCells[`${cell.x},${cell.y}`].join('・')}
+                  </div>
+                );
+              })()}
 
               {/* Layer 3 & 1: 文字データ (提示文字 or 解答文字) */}
               <span className="cell-char" style={{ 
