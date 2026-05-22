@@ -348,12 +348,11 @@ export async function solveZigzagAsync(
     }
   }
 
-  // 2.5 Wリスト用の網掛けブロック抽出とハミルトンパス列挙
+  // 2.5 Wリスト用の網掛けブロック抽出
   interface ShadedBlock {
     id: number;
     nodes: SolverNode[];
     nodeIds: Set<string>;
-    hamiltonianPaths: string[][];
   }
 
   const shadedBlocks: ShadedBlock[] = [];
@@ -380,44 +379,18 @@ export async function solveZigzagAsync(
           }
         }
 
-        const paths: string[][] = [];
-        const N = blockNodes.length;
         const blockNodeIds = new Set(blockNodes.map(n => n.id));
-
-        const findHamiltonianPaths = (currId: string, visited: Set<string>, currentPath: string[]) => {
-          if (currentPath.length === N) {
-            paths.push([...currentPath]);
-            return;
-          }
-          const currNode = nodeMap.get(currId)!;
-          for (const neighborId of currNode.neighbors) {
-            if (blockNodeIds.has(neighborId) && !visited.has(neighborId)) {
-              visited.add(neighborId);
-              currentPath.push(neighborId);
-              findHamiltonianPaths(neighborId, visited, currentPath);
-              currentPath.pop();
-              visited.delete(neighborId);
-            }
-          }
-        };
-
-        for (const startNode of blockNodes) {
-          const visited = new Set<string>([startNode.id]);
-          findHamiltonianPaths(startNode.id, visited, [startNode.id]);
-        }
-
         shadedBlocks.push({
           id: blockIdCounter++,
           nodes: blockNodes,
-          nodeIds: blockNodeIds,
-          hamiltonianPaths: paths
+          nodeIds: blockNodeIds
         });
       }
     }
 
     log(`[Wリスト] 網掛けブロックを ${shadedBlocks.length} 個検出しました。`);
     shadedBlocks.forEach(b => {
-      log(`  ブロック #${b.id}: サイズ=${b.nodes.length}, ハミルトンパス数=${b.hamiltonianPaths.length}`);
+      log(`  ブロック #${b.id}: サイズ=${b.nodes.length}`);
     });
   }
 
@@ -479,6 +452,149 @@ export async function solveZigzagAsync(
     node.isFixed = true;
   };
 
+  // 網掛けブロックに複数単語を配置できるか検証する（文字共有対応）
+  const canAssignWordsToBlock = (
+    blockNodes: SolverNode[],
+    words: string[],
+    gridChars: Record<string, string>
+  ): boolean => {
+    const blockNodeIds = new Set(blockNodes.map(n => n.id));
+    const currentGrid = { ...gridChars };
+    const coveredNodes = new Set<string>();
+    const wordPaths: string[][] = [];
+
+    const dfsAssign = (wordIdx: number): boolean => {
+      if (wordIdx === words.length) {
+        if (coveredNodes.size !== blockNodes.length) {
+          return false;
+        }
+        // 文字共有（交差）の連結性チェック
+        if (words.length >= 2) {
+          const adj: number[][] = Array.from({ length: words.length }, () => []);
+          for (let i = 0; i < words.length; i++) {
+            const pathI = new Set(wordPaths[i]);
+            for (let j = i + 1; j < words.length; j++) {
+              let hasOverlap = false;
+              for (const nid of wordPaths[j]) {
+                if (pathI.has(nid)) {
+                  hasOverlap = true;
+                  break;
+                }
+              }
+              if (hasOverlap) {
+                adj[i].push(j);
+                adj[j].push(i);
+              }
+            }
+          }
+          // BFSで連結しているかチェック
+          const visitedWords = new Set<number>();
+          const queue: number[] = [0];
+          visitedWords.add(0);
+          while (queue.length > 0) {
+            const curr = queue.shift()!;
+            for (const neighbor of adj[curr]) {
+              if (!visitedWords.has(neighbor)) {
+                visitedWords.add(neighbor);
+                queue.push(neighbor);
+              }
+            }
+          }
+          if (visitedWords.size < words.length) {
+            return false; // 連結していない単語が存在する
+          }
+        }
+        return true;
+      }
+      
+      const word = words[wordIdx];
+      
+      for (const startNode of blockNodes) {
+        const startChar = currentGrid[startNode.id];
+        if (startChar && startChar !== word[0]) continue;
+        
+        const path: string[] = [startNode.id];
+        const visited = new Set<string>([startNode.id]);
+        
+        const findPaths = (currId: string, charIdx: number): boolean => {
+          if (charIdx === word.length) {
+            const addedNodes: string[] = [];
+            const prevGridValues: { [id: string]: string | undefined } = {};
+            
+            for (let i = 0; i < path.length; i++) {
+              const nid = path[i];
+              const c = word[i];
+              if (!coveredNodes.has(nid)) {
+                coveredNodes.add(nid);
+                addedNodes.push(nid);
+              }
+              if (currentGrid[nid] === undefined) {
+                prevGridValues[nid] = undefined;
+                currentGrid[nid] = c;
+              } else {
+                prevGridValues[nid] = currentGrid[nid];
+              }
+            }
+            
+            wordPaths[wordIdx] = [...path];
+            if (dfsAssign(wordIdx + 1)) {
+              return true;
+            }
+            
+            for (const nid of addedNodes) {
+              coveredNodes.delete(nid);
+            }
+            for (const nid in prevGridValues) {
+              const val = prevGridValues[nid];
+              if (val === undefined) {
+                delete currentGrid[nid];
+              } else {
+                currentGrid[nid] = val;
+              }
+            }
+            return false;
+          }
+          
+          const currNode = nodeMap.get(currId)!;
+          const nextChar = word[charIdx];
+          
+          for (const neighborId of currNode.neighbors) {
+            if (blockNodeIds.has(neighborId) && !visited.has(neighborId)) {
+              const nGChar = currentGrid[neighborId];
+              if (nGChar && nGChar !== nextChar) continue;
+              
+              visited.add(neighborId);
+              path.push(neighborId);
+              if (findPaths(neighborId, charIdx + 1)) return true;
+              path.pop();
+              visited.delete(neighborId);
+            }
+          }
+          return false;
+        };
+        
+        const originalStartChar = currentGrid[startNode.id];
+        currentGrid[startNode.id] = word[0];
+        const startAdded = !coveredNodes.has(startNode.id);
+        if (startAdded) coveredNodes.add(startNode.id);
+        
+        if (findPaths(startNode.id, 1)) {
+          return true;
+        }
+        
+        if (startAdded) coveredNodes.delete(startNode.id);
+        if (originalStartChar === undefined) {
+          delete currentGrid[startNode.id];
+        } else {
+          currentGrid[startNode.id] = originalStartChar;
+        }
+      }
+      return false;
+    };
+    
+    return dfsAssign(0);
+  };
+
   const canNodeAcceptChar = (node: SolverNode, char: string): boolean => {
     if (node.isFixed) {
       return node.currentChar === char;
@@ -491,40 +607,46 @@ export async function solveZigzagAsync(
         const block = shadedBlocks.find(b => b.nodeIds.has(node.id));
         if (block) {
           const list2Words = (puzzle.wordList2 || []).filter(w => w.trim() !== '');
-          const wordsOfSameLength = list2Words.filter(w => w.length === block.nodes.length);
-
-          const charInAnyWord = wordsOfSameLength.some(w => w.includes(char));
+          
+          const charInAnyWord = list2Words.some(w => w.includes(char));
           if (!charInAnyWord) {
             return false;
           }
 
-          let canFit = false;
-          for (const path of block.hamiltonianPaths) {
-            const idx = path.indexOf(node.id);
-            if (idx !== -1) {
-              const hasMatchingWord = wordsOfSameLength.some(w => w[idx] === char);
-              if (hasMatchingWord) {
-                // パス上の他の固定セルの文字と、その単語の他の位置の文字に矛盾がないか確認
-                const isPathConsistent = wordsOfSameLength.some(w => {
-                  if (w[idx] !== char) return false;
-                  for (let i = 0; i < path.length; i++) {
-                    if (i === idx) continue;
-                    const otherNode = nodeMap.get(path[i])!;
-                    if (otherNode.isFixed && otherNode.currentChar !== w[i]) {
-                      return false;
-                    }
-                  }
-                  return true;
-                });
-
-                if (isPathConsistent) {
-                  canFit = true;
-                  break;
-                }
-              }
+          const gridChars: Record<string, string> = {};
+          for (const n of nodeMap.values()) {
+            if (n.isFixed && n.currentChar) {
+              gridChars[n.id] = n.currentChar;
             }
           }
+          gridChars[node.id] = char;
 
+          const candidateWords = list2Words.filter(w => w.length <= block.nodes.length);
+          let canFit = false;
+
+          const checkCombinations = (startIdx: number, selected: string[], currentLenSum: number, hasCharWord: boolean): boolean => {
+            if (currentLenSum >= block.nodes.length) {
+              if (hasCharWord && canAssignWordsToBlock(block.nodes, selected, gridChars)) {
+                return true;
+              }
+              if (currentLenSum > block.nodes.length + 3) {
+                return false;
+              }
+            }
+
+            for (let i = startIdx; i < candidateWords.length; i++) {
+              const w = candidateWords[i];
+              selected.push(w);
+              const nextHasChar = hasCharWord || w.includes(char);
+              if (checkCombinations(i + 1, selected, currentLenSum + w.length, nextHasChar)) {
+                return true;
+              }
+              selected.pop();
+            }
+            return false;
+          };
+
+          canFit = checkCombinations(0, [], 0, false);
           if (!canFit) {
             return false;
           }
@@ -583,59 +705,70 @@ export async function solveZigzagAsync(
     if (!puzzle.isWList) return { success: true };
 
     const list2Words = (puzzle.wordList2 || []).filter(w => w.trim() !== '');
-    const gridChars = getGridChars();
+    const gridChars: Record<string, string> = {};
+    for (const node of nodeMap.values()) {
+      if (node.isFixed && node.currentChar) {
+        gridChars[node.id] = node.currentChar;
+      }
+    }
 
-    // 各網掛けブロックについて、対応可能なリスト2の単語を調べる
-    const blockCandidates: Set<string>[] = shadedBlocks.map(block => {
-      const candidates = new Set<string>();
-      const N = block.nodes.length;
-      const wordsOfSameLength = list2Words.filter(w => w.length === N);
+    const blockSizes = shadedBlocks.map(b => b.nodes.length);
+    const totalBlockNodes = blockSizes.reduce((sum, s) => sum + s, 0);
 
-      for (const path of block.hamiltonianPaths) {
-        const pathWord = path.map(nid => gridChars[nodeMap.get(nid)!.y][nodeMap.get(nid)!.x] || '').join('');
-        if (pathWord.length === N && wordsOfSameLength.includes(pathWord)) {
-          candidates.add(pathWord);
+    const checkAssignmentForWords = (activeWords: string[]): boolean => {
+      const totalWordLen = activeWords.reduce((sum, w) => sum + w.length, 0);
+      if (totalWordLen < totalBlockNodes) return false;
+
+      const sortedActiveWords = [...activeWords].sort((a, b) => b.length - a.length);
+      const blockAssignments: string[][] = shadedBlocks.map(() => []);
+
+      const assignWordToBlock = (wordIdx: number): boolean => {
+        if (wordIdx === sortedActiveWords.length) {
+          for (let i = 0; i < shadedBlocks.length; i++) {
+            const assigned = blockAssignments[i];
+            const size = blockSizes[i];
+            const sumLen = assigned.reduce((sum, w) => sum + w.length, 0);
+            if (sumLen < size) return false;
+          }
+
+          for (let i = 0; i < shadedBlocks.length; i++) {
+            const block = shadedBlocks[i];
+            const wordsForBlock = blockAssignments[i];
+            if (!canAssignWordsToBlock(block.nodes, wordsForBlock, gridChars)) {
+              return false;
+            }
+          }
+          return true;
         }
-      }
-      return candidates;
-    });
 
-    // バックトラックで網掛けブロックにリスト2単語を1対1で割り当て可能か調べる
-    let foundAssignment = false;
-    let assignedWordsSet = new Set<string>();
+        const word = sortedActiveWords[wordIdx];
+        for (let i = 0; i < shadedBlocks.length; i++) {
+          const block = shadedBlocks[i];
+          if (word.length > block.nodes.length) continue;
 
-    const matchBlocks = (blockIdx: number, usedWords: Set<string>) => {
-      if (foundAssignment) return;
-      if (blockIdx === shadedBlocks.length) {
-        foundAssignment = true;
-        assignedWordsSet = new Set(usedWords);
-        return;
-      }
-
-      for (const word of blockCandidates[blockIdx]) {
-        if (!usedWords.has(word)) {
-          usedWords.add(word);
-          matchBlocks(blockIdx + 1, usedWords);
-          if (foundAssignment) return;
-          usedWords.delete(word);
+          blockAssignments[i].push(word);
+          if (assignWordToBlock(wordIdx + 1)) return true;
+          blockAssignments[i].pop();
         }
-      }
+        return false;
+      };
+
+      return assignWordToBlock(0);
     };
 
-    matchBlocks(0, new Set());
-
-    if (!foundAssignment) {
-      return { success: false };
-    }
-
-    const unusedWords = list2Words.filter(w => !assignedWordsSet.has(w));
-    if (unusedWords.length === 0) {
+    if (checkAssignmentForWords(list2Words)) {
       return { success: true };
-    } else if (unusedWords.length === 1) {
-      return { success: true, remainingWord: unusedWords[0] };
-    } else {
-      return { success: false };
     }
+
+    for (let i = 0; i < list2Words.length; i++) {
+      const remaining = list2Words[i];
+      const activeWords = list2Words.filter((_, idx) => idx !== i);
+      if (checkAssignmentForWords(activeWords)) {
+        return { success: true, remainingWord: remaining };
+      }
+    }
+
+    return { success: false };
   };
 
   await reportStep();
