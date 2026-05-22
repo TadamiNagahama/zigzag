@@ -37,6 +37,7 @@ export interface SolveResult {
   isBacktracked?: boolean;
   isAlternativeFound?: boolean;
   isUnique?: boolean;
+  remainingWord?: string;
 }
 
 export type SolverStepCallback = (cells: Cell[][]) => Promise<void>;
@@ -347,6 +348,79 @@ export async function solveZigzagAsync(
     }
   }
 
+  // 2.5 Wリスト用の網掛けブロック抽出とハミルトンパス列挙
+  interface ShadedBlock {
+    id: number;
+    nodes: SolverNode[];
+    nodeIds: Set<string>;
+    hamiltonianPaths: string[][];
+  }
+
+  const shadedBlocks: ShadedBlock[] = [];
+  if (puzzle.isWList) {
+    const visitedShaded = new Set<string>();
+    let blockIdCounter = 0;
+
+    for (const node of nodeMap.values()) {
+      const cell = cells[node.y][node.x];
+      if (cell.isShaded && !visitedShaded.has(node.id)) {
+        const blockNodes: SolverNode[] = [];
+        const queue: SolverNode[] = [node];
+        visitedShaded.add(node.id);
+
+        while (queue.length > 0) {
+          const curr = queue.shift()!;
+          blockNodes.push(curr);
+          for (const neighborId of curr.neighbors) {
+            const neighborNode = nodeMap.get(neighborId);
+            if (neighborNode && cells[neighborNode.y][neighborNode.x].isShaded && !visitedShaded.has(neighborId)) {
+              visitedShaded.add(neighborId);
+              queue.push(neighborNode);
+            }
+          }
+        }
+
+        const paths: string[][] = [];
+        const N = blockNodes.length;
+        const blockNodeIds = new Set(blockNodes.map(n => n.id));
+
+        const findHamiltonianPaths = (currId: string, visited: Set<string>, currentPath: string[]) => {
+          if (currentPath.length === N) {
+            paths.push([...currentPath]);
+            return;
+          }
+          const currNode = nodeMap.get(currId)!;
+          for (const neighborId of currNode.neighbors) {
+            if (blockNodeIds.has(neighborId) && !visited.has(neighborId)) {
+              visited.add(neighborId);
+              currentPath.push(neighborId);
+              findHamiltonianPaths(neighborId, visited, currentPath);
+              currentPath.pop();
+              visited.delete(neighborId);
+            }
+          }
+        };
+
+        for (const startNode of blockNodes) {
+          const visited = new Set<string>([startNode.id]);
+          findHamiltonianPaths(startNode.id, visited, [startNode.id]);
+        }
+
+        shadedBlocks.push({
+          id: blockIdCounter++,
+          nodes: blockNodes,
+          nodeIds: blockNodeIds,
+          hamiltonianPaths: paths
+        });
+      }
+    }
+
+    log(`[Wリスト] 網掛けブロックを ${shadedBlocks.length} 個検出しました。`);
+    shadedBlocks.forEach(b => {
+      log(`  ブロック #${b.id}: サイズ=${b.nodes.length}, ハミルトンパス数=${b.hamiltonianPaths.length}`);
+    });
+  }
+
   // 3. 単語リストの初期化
   const allNumbersOnBoard = new Set<number>();
   cells.forEach(row => row.forEach(cell => {
@@ -409,6 +483,55 @@ export async function solveZigzagAsync(
     if (node.isFixed) {
       return node.currentChar === char;
     }
+
+    // Wリスト用の網掛け侵入制限
+    if (puzzle.isWList) {
+      const cell = cells[node.y][node.x];
+      if (cell.isShaded) {
+        const block = shadedBlocks.find(b => b.nodeIds.has(node.id));
+        if (block) {
+          const list2Words = (puzzle.wordList2 || []).filter(w => w.trim() !== '');
+          const wordsOfSameLength = list2Words.filter(w => w.length === block.nodes.length);
+
+          const charInAnyWord = wordsOfSameLength.some(w => w.includes(char));
+          if (!charInAnyWord) {
+            return false;
+          }
+
+          let canFit = false;
+          for (const path of block.hamiltonianPaths) {
+            const idx = path.indexOf(node.id);
+            if (idx !== -1) {
+              const hasMatchingWord = wordsOfSameLength.some(w => w[idx] === char);
+              if (hasMatchingWord) {
+                // パス上の他の固定セルの文字と、その単語の他の位置の文字に矛盾がないか確認
+                const isPathConsistent = wordsOfSameLength.some(w => {
+                  if (w[idx] !== char) return false;
+                  for (let i = 0; i < path.length; i++) {
+                    if (i === idx) continue;
+                    const otherNode = nodeMap.get(path[i])!;
+                    if (otherNode.isFixed && otherNode.currentChar !== w[i]) {
+                      return false;
+                    }
+                  }
+                  return true;
+                });
+
+                if (isPathConsistent) {
+                  canFit = true;
+                  break;
+                }
+              }
+            }
+          }
+
+          if (!canFit) {
+            return false;
+          }
+        }
+      }
+    }
+
     if (puzzle.isWListStar && node.logiNumber !== null && puzzle.wordStarList?.[node.logiNumber]) {
       const list2Words = (puzzle.wordList2 || []).filter(w => w.trim() !== '');
       const assignedWords = new Set(solverWords.map(sw => sw.text).filter(t => t !== ""));
@@ -454,6 +577,66 @@ export async function solveZigzagAsync(
     const col = String.fromCharCode(65 + node.x);
     return `${col}${node.y + 1}`;
   }
+
+  // Wリスト用の解答バリデーションと余り単語特定
+  const validateWListAssignment = (): { success: boolean; remainingWord?: string } => {
+    if (!puzzle.isWList) return { success: true };
+
+    const list2Words = (puzzle.wordList2 || []).filter(w => w.trim() !== '');
+    const gridChars = getGridChars();
+
+    // 各網掛けブロックについて、対応可能なリスト2の単語を調べる
+    const blockCandidates: Set<string>[] = shadedBlocks.map(block => {
+      const candidates = new Set<string>();
+      const N = block.nodes.length;
+      const wordsOfSameLength = list2Words.filter(w => w.length === N);
+
+      for (const path of block.hamiltonianPaths) {
+        const pathWord = path.map(nid => gridChars[nodeMap.get(nid)!.y][nodeMap.get(nid)!.x] || '').join('');
+        if (pathWord.length === N && wordsOfSameLength.includes(pathWord)) {
+          candidates.add(pathWord);
+        }
+      }
+      return candidates;
+    });
+
+    // バックトラックで網掛けブロックにリスト2単語を1対1で割り当て可能か調べる
+    let foundAssignment = false;
+    let assignedWordsSet = new Set<string>();
+
+    const matchBlocks = (blockIdx: number, usedWords: Set<string>) => {
+      if (foundAssignment) return;
+      if (blockIdx === shadedBlocks.length) {
+        foundAssignment = true;
+        assignedWordsSet = new Set(usedWords);
+        return;
+      }
+
+      for (const word of blockCandidates[blockIdx]) {
+        if (!usedWords.has(word)) {
+          usedWords.add(word);
+          matchBlocks(blockIdx + 1, usedWords);
+          if (foundAssignment) return;
+          usedWords.delete(word);
+        }
+      }
+    };
+
+    matchBlocks(0, new Set());
+
+    if (!foundAssignment) {
+      return { success: false };
+    }
+
+    const unusedWords = list2Words.filter(w => !assignedWordsSet.has(w));
+    if (unusedWords.length === 0) {
+      return { success: true };
+    } else if (unusedWords.length === 1) {
+      return { success: true, remainingWord: unusedWords[0] };
+    } else {
+      return { success: false };
+    }
+  };
 
   await reportStep();
 
@@ -2376,6 +2559,14 @@ export async function solveZigzagAsync(
           restoreSnapshot(snap);
           return false;
         }
+
+        if (puzzle.isWList) {
+          const wlistRes = validateWListAssignment();
+          if (!wlistRes.success) {
+            restoreSnapshot(snap);
+            return false;
+          }
+        }
         
         if (findAlternative && firstSolutionCells) {
           const { isDifferent, diffDetails } = checkIsDifferent();
@@ -2603,6 +2794,10 @@ export async function solveZigzagAsync(
       }
 
       if (wordIdx === sortedWords.length) {
+        if (puzzle.isWList) {
+          const wlistRes = validateWListAssignment();
+          if (!wlistRes.success) return false;
+        }
         if (findAlternative && firstSolutionCells) {
           const { isDifferent, diffDetails } = checkIsDifferent();
           if (!isDifferent) {
@@ -2915,10 +3110,18 @@ export async function solveZigzagAsync(
     }
   }
 
+  // 最終的な解答の判定
+  const wlistRes = validateWListAssignment();
+  if (puzzle.isWList && !wlistRes.success) {
+    return {
+      success: false,
+      message: 'Wリストの単語割り当てが矛盾しています。',
+      solvedCells: finalCells
+    };
+  }
+
   // 盤面が全て埋まっていれば、内部的なパスの繋がりが不完全でも「解答完了」とみなす
   const isComplete = allCellsFilled || isUnique;
-
-
 
   return {
     success: isComplete,
@@ -2926,6 +3129,7 @@ export async function solveZigzagAsync(
     message: isComplete ? '解答が完了しました！' : '論理的には解けません。総当たりしか手段がありません。',
     isBacktracked,
     isAlternativeFound,
-    isUnique
+    isUnique,
+    remainingWord: wlistRes.remainingWord
   };
 }

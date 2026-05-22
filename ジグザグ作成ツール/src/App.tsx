@@ -1260,12 +1260,20 @@ function App() {
 
       if (result.success) {
         // 成功：結果を履歴に保存し、反映する
-        const solvedPuzzle = { ...puzzle, cells: result.solvedCells };
+        const solvedPuzzle = { 
+          ...puzzle, 
+          cells: result.solvedCells,
+          isRemainingAnswer: result.remainingWord ? true : puzzle.isRemainingAnswer,
+          remainingAnswerWord: result.remainingWord || puzzle.remainingAnswerWord
+        };
         pushPuzzle(prev => ({
           ...prev,
           cells: result.solvedCells,
+          isRemainingAnswer: result.remainingWord ? true : prev.isRemainingAnswer,
+          remainingAnswerWord: result.remainingWord || prev.remainingAnswerWord,
           updatedAt: Date.now()
         }));
+        setPuzzle(solvedPuzzle);
         const shouldSuppressSuccess = result.isBacktracked || findAlternative;
         validateManuscript(solvedPuzzle, shouldSuppressSuccess);
 
@@ -1372,11 +1380,13 @@ function App() {
     // 制限チェック
     const currentType = puzzle.puzzleType || 'ノーマル';
     
-    // 現在対応しているのは「ノーマル（通常）」「矢印」「Wリスト★」「超（網掛けあり）＋ノーマル」のみ
+    // 現在対応しているのは「ノーマル（通常）」「矢印」「Wリスト」「Wリスト★」「超（網掛けあり）＋ノーマル」のみ
     let isSupportedType = false;
     if (currentType === 'ノーマル' || currentType === '通常') {
       isSupportedType = true; // ノーマル、および 超＋ノーマル
     } else if (currentType === '矢印') {
+      isSupportedType = true;
+    } else if (currentType === 'Wリスト') {
       isSupportedType = true;
     } else if (currentType === 'Wリスト★') {
       isSupportedType = true;
