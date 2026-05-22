@@ -1473,6 +1473,8 @@ function App() {
       isSupportedType = true;
     } else if (currentType === 'Wリスト★') {
       isSupportedType = true;
+    } else if (currentType === '変則') {
+      isSupportedType = true;
     }
 
     if (!isSupportedType) {
