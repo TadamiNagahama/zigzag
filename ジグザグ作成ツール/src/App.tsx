@@ -577,34 +577,117 @@ function App() {
 
   const completedWord2Indices = useMemo(() => {
     const completedIndices = new Set<number>();
-    if (!puzzle.isWListStar || !puzzle.wordList2) return completedIndices;
+    if (!puzzle.wordList2) return completedIndices;
 
     const list2Words = puzzle.wordList2.map(w => w.trim()).filter(w => w !== '');
-    
-    // ★の単語番号を正しく抽出
-    const starNums: number[] = [];
-    if (puzzle.wordStarList) {
-      Object.keys(puzzle.wordStarList).forEach(k => {
-        const num = parseInt(k, 10);
-        if (puzzle.wordStarList?.[num]) {
-          starNums.push(num);
+
+    if (puzzle.isWListStar) {
+      // ★の単語番号を正しく抽出
+      const starNums: number[] = [];
+      if (puzzle.wordStarList) {
+        Object.keys(puzzle.wordStarList).forEach(k => {
+          const num = parseInt(k, 10);
+          if (puzzle.wordStarList?.[num]) {
+            starNums.push(num);
+          }
+        });
+      }
+
+      starNums.forEach(num => {
+        list2Words.forEach((word, idx) => {
+          if (word.length > 0) {
+            const path = getDrawnCellsForWord(num, word);
+            if (path.length === word.length) {
+              completedIndices.add(idx);
+            }
+          }
+        });
+      });
+    } else if (puzzle.isWList) {
+      // Wリストの場合
+      // 網掛けマスをリストアップ
+      const shadedCells: { x: number, y: number }[] = [];
+      for (let y = 0; y < puzzle.height; y++) {
+        for (let x = 0; x < puzzle.width; x++) {
+          const cell = puzzle.cells[y][x];
+          if (cell.isShaded && cell.type === 'normal') {
+            const px = cell.mergedParent ? cell.mergedParent.x : x;
+            const py = cell.mergedParent ? cell.mergedParent.y : y;
+            if (!shadedCells.some(c => c.x === px && c.y === py)) {
+              shadedCells.push({ x: px, y: py });
+            }
+          }
+        }
+      }
+
+      const checkWordInShaded = (word: string): boolean => {
+        if (word.length === 0) return false;
+
+        const findPath = (
+          x: number, y: number,
+          charIndex: number,
+          visited: Set<string>
+        ): boolean => {
+          if (x < 0 || x >= puzzle.width || y < 0 || y >= puzzle.height) return false;
+
+          const cell = puzzle.cells[y][x];
+          const px = cell.mergedParent ? cell.mergedParent.x : x;
+          const py = cell.mergedParent ? cell.mergedParent.y : y;
+          const parentCell = puzzle.cells[py][px];
+
+          if (parentCell.type !== 'normal' || !parentCell.isShaded) return false;
+
+          const playerChar = (appMode === 'answer') ? (parentCell.answerChar || parentCell.char) : parentCell.char;
+          const cellChar = playerChar || '';
+          if (cellChar !== word[charIndex]) return false;
+
+          const key = `${px},${py}`;
+          if (visited.has(key)) return false;
+
+          if (charIndex + 1 === word.length) return true;
+
+          const newVisited = new Set(visited);
+          newVisited.add(key);
+
+          const groupCells: { x: number, y: number }[] = [];
+          if (parentCell.mergedSize) {
+            for (let dy = 0; dy < parentCell.mergedSize.height; dy++) {
+              for (let dx = 0; dx < parentCell.mergedSize.width; dx++) {
+                groupCells.push({ x: px + dx, y: py + dy });
+              }
+            }
+          } else {
+            groupCells.push({ x: px, y: py });
+          }
+
+          const neighbors = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+          for (const gc of groupCells) {
+            for (const [dx, dy] of neighbors) {
+              const nx = gc.x + dx;
+              const ny = gc.y + dy;
+              if (findPath(nx, ny, charIndex + 1, newVisited)) return true;
+            }
+          }
+          return false;
+        };
+
+        for (const start of shadedCells) {
+          if (findPath(start.x, start.y, 0, new Set())) {
+            return true;
+          }
+        }
+        return false;
+      };
+
+      list2Words.forEach((word, idx) => {
+        if (checkWordInShaded(word)) {
+          completedIndices.add(idx);
         }
       });
     }
 
-    starNums.forEach(num => {
-      list2Words.forEach((word, idx) => {
-        if (word.length > 0) {
-          const path = getDrawnCellsForWord(num, word);
-          if (path.length === word.length) {
-            completedIndices.add(idx);
-          }
-        }
-      });
-    });
-
     return completedIndices;
-  }, [puzzle.isWListStar, puzzle.wordList2, puzzle.wordList, puzzle.wordStarList, getDrawnCellsForWord]);
+  }, [puzzle.isWList, puzzle.isWListStar, puzzle.wordList2, puzzle.cells, puzzle.width, puzzle.height, appMode, getDrawnCellsForWord]);
 
   // 全単語が埋まったときのメッセージ
   const prevCompletedCountRef = useRef(0);

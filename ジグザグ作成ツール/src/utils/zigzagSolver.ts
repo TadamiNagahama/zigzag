@@ -456,55 +456,20 @@ export async function solveZigzagAsync(
   const canAssignWordsToBlock = (
     blockNodes: SolverNode[],
     words: string[],
-    gridChars: Record<string, string>
+    gridChars: Record<string, string>,
+    outGrid?: Record<string, string>
   ): boolean => {
     const blockNodeIds = new Set(blockNodes.map(n => n.id));
     const currentGrid = { ...gridChars };
     const coveredNodes = new Set<string>();
-    const wordPaths: string[][] = [];
 
     const dfsAssign = (wordIdx: number): boolean => {
       if (wordIdx === words.length) {
-        if (coveredNodes.size !== blockNodes.length) {
-          return false;
+        const success = coveredNodes.size === blockNodes.length;
+        if (success && outGrid) {
+          Object.assign(outGrid, currentGrid);
         }
-        // 文字共有（交差）の連結性チェック
-        if (words.length >= 2) {
-          const adj: number[][] = Array.from({ length: words.length }, () => []);
-          for (let i = 0; i < words.length; i++) {
-            const pathI = new Set(wordPaths[i]);
-            for (let j = i + 1; j < words.length; j++) {
-              let hasOverlap = false;
-              for (const nid of wordPaths[j]) {
-                if (pathI.has(nid)) {
-                  hasOverlap = true;
-                  break;
-                }
-              }
-              if (hasOverlap) {
-                adj[i].push(j);
-                adj[j].push(i);
-              }
-            }
-          }
-          // BFSで連結しているかチェック
-          const visitedWords = new Set<number>();
-          const queue: number[] = [0];
-          visitedWords.add(0);
-          while (queue.length > 0) {
-            const curr = queue.shift()!;
-            for (const neighbor of adj[curr]) {
-              if (!visitedWords.has(neighbor)) {
-                visitedWords.add(neighbor);
-                queue.push(neighbor);
-              }
-            }
-          }
-          if (visitedWords.size < words.length) {
-            return false; // 連結していない単語が存在する
-          }
-        }
-        return true;
+        return success;
       }
       
       const word = words[wordIdx];
@@ -536,7 +501,6 @@ export async function solveZigzagAsync(
               }
             }
             
-            wordPaths[wordIdx] = [...path];
             if (dfsAssign(wordIdx + 1)) {
               return true;
             }
@@ -592,7 +556,8 @@ export async function solveZigzagAsync(
       return false;
     };
     
-    return dfsAssign(0);
+    const res = dfsAssign(0);
+    return res;
   };
 
   // 指定された単語が、指定された文字位置で網掛けブロックに（他の文字と矛盾なく）収まるかを判定する
@@ -778,7 +743,7 @@ export async function solveZigzagAsync(
   }
 
   // Wリスト用の解答バリデーションと余り単語特定
-  const validateWListAssignment = (): { success: boolean; remainingWord?: string } => {
+  const validateWListAssignment = (): { success: boolean; remainingWord?: string; assignments?: Record<string, string> } => {
     if (!puzzle.isWList) return { success: true };
 
     const list2Words = (puzzle.wordList2 || []).filter(w => w.trim() !== '');
@@ -792,12 +757,15 @@ export async function solveZigzagAsync(
     const blockSizes = shadedBlocks.map(b => b.nodes.length);
     const totalBlockNodes = blockSizes.reduce((sum, s) => sum + s, 0);
 
-    const checkAssignmentForWords = (activeWords: string[]): boolean => {
+    const checkAssignmentForWords = (activeWords: string[]): { success: boolean; assignments?: Record<string, string> } => {
       const totalWordLen = activeWords.reduce((sum, w) => sum + w.length, 0);
-      if (totalWordLen < totalBlockNodes) return false;
+      if (totalWordLen < totalBlockNodes) {
+        return { success: false };
+      }
 
       const sortedActiveWords = [...activeWords].sort((a, b) => b.length - a.length);
       const blockAssignments: string[][] = shadedBlocks.map(() => []);
+      const mergedGrid: Record<string, string> = {};
 
       const assignWordToBlock = (wordIdx: number): boolean => {
         if (wordIdx === sortedActiveWords.length) {
@@ -805,15 +773,19 @@ export async function solveZigzagAsync(
             const assigned = blockAssignments[i];
             const size = blockSizes[i];
             const sumLen = assigned.reduce((sum, w) => sum + w.length, 0);
-            if (sumLen < size) return false;
+            if (sumLen < size) {
+              return false;
+            }
           }
 
           for (let i = 0; i < shadedBlocks.length; i++) {
             const block = shadedBlocks[i];
             const wordsForBlock = blockAssignments[i];
-            if (!canAssignWordsToBlock(block.nodes, wordsForBlock, gridChars)) {
+            const blockGrid: Record<string, string> = {};
+            if (!canAssignWordsToBlock(block.nodes, wordsForBlock, gridChars, blockGrid)) {
               return false;
             }
+            Object.assign(mergedGrid, blockGrid);
           }
           return true;
         }
@@ -830,18 +802,23 @@ export async function solveZigzagAsync(
         return false;
       };
 
-      return assignWordToBlock(0);
+      if (assignWordToBlock(0)) {
+        return { success: true, assignments: mergedGrid };
+      }
+      return { success: false };
     };
 
-    if (checkAssignmentForWords(list2Words)) {
-      return { success: true };
+    const resNoRemaining = checkAssignmentForWords(list2Words);
+    if (resNoRemaining.success) {
+      return { success: true, assignments: resNoRemaining.assignments };
     }
 
     for (let i = 0; i < list2Words.length; i++) {
       const remaining = list2Words[i];
       const activeWords = list2Words.filter((_, idx) => idx !== i);
-      if (checkAssignmentForWords(activeWords)) {
-        return { success: true, remainingWord: remaining };
+      const resWithRemaining = checkAssignmentForWords(activeWords);
+      if (resWithRemaining.success) {
+        return { success: true, remainingWord: remaining, assignments: resWithRemaining.assignments };
       }
     }
 
@@ -3263,6 +3240,10 @@ export async function solveZigzagAsync(
   const finalCells = currentCells.map((row) => row.map((c) => ({ ...c })));
   const currGridChars = getGridChars();
   
+  // Wリスト用の検証と確定文字マッピング取得
+  const wlistRes = puzzle.isWList ? validateWListAssignment() : null;
+  const wlistAssignments = wlistRes?.success ? wlistRes.assignments : null;
+
   let allCellsFilled = true;
   for (const node of nodeMap.values()) {
     const cell = finalCells[node.y][node.x];
@@ -3279,9 +3260,13 @@ export async function solveZigzagAsync(
       cell.isRevealed = true;
     }
 
+    if (wlistAssignments && wlistAssignments[node.id]) {
+      cell.answerChar = wlistAssignments[node.id];
+    }
+
     if (node.isFixed) {
       cell.answerChar = node.currentChar;
-    } else {
+    } else if (!(wlistAssignments && wlistAssignments[node.id])) {
       allCellsFilled = false;
     }
 
@@ -3321,8 +3306,8 @@ export async function solveZigzagAsync(
   }
 
   // 最終的な解答の判定
-  const wlistRes = validateWListAssignment();
-  if (puzzle.isWList && !wlistRes.success) {
+  const finalWlistRes = wlistRes || validateWListAssignment();
+  if (puzzle.isWList && !finalWlistRes.success) {
     return {
       success: false,
       message: 'Wリストの単語割り当てが矛盾しています。',
@@ -3340,6 +3325,6 @@ export async function solveZigzagAsync(
     isBacktracked,
     isAlternativeFound,
     isUnique,
-    remainingWord: wlistRes.remainingWord
+    remainingWord: finalWlistRes.remainingWord
   };
 }
