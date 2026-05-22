@@ -124,7 +124,7 @@ export async function solveZigzagAsync(
   const nodeMap: Map<string, SolverNode> = new Map();
   const solverWords: SolverWord[] = [];
 
-  const isChoMode = puzzle.cells.some(row => row.some(c => c.isShaded));
+  const isChoMode = !puzzle.isWList && !puzzle.isWListStar && puzzle.cells.some(row => row.some(c => c.isShaded));
   if (isChoMode) {
     log("超モードを検出しました。網掛けの下の数字を隠蔽して推論を開始します。");
   }
