@@ -328,6 +328,7 @@ function App() {
   const [solveCandidateIndex, setSolveCandidateIndex] = useState(0);
 
   const [isSolving, setIsSolving] = useState(false);
+  const [autoSolveSharedCells, setAutoSolveSharedCells] = useState<Record<string, number[]>>({});
   const [isBacktracking, setIsBacktracking] = useState(false);
   const [solveProgressCount, setSolveProgressCount] = useState(0);
   const isCancelledRef = useRef(false);
@@ -1268,6 +1269,8 @@ function App() {
         cells: puzzle.cells.map(row => row.map(c => ({ 
           ...c, 
           answerChar: '', 
+          // 変則モードの場合は通常の数字もクリア
+          number: puzzle.puzzleType === '変則' ? null : c.number,
           isRevealed: !c.isShaded // 網掛け以外は表示、網掛けは非表示
         })))
       };
@@ -1280,6 +1283,8 @@ function App() {
         cells: puzzle.cells.map(row => row.map(c => ({ 
           ...c, 
           answerChar: '', 
+          // 変則モードの場合は通常の数字もクリア
+          number: puzzle.puzzleType === '変則' ? null : c.number,
           isRevealed: !c.isShaded
         })))
       };
@@ -1290,10 +1295,20 @@ function App() {
         ...puzzle,
         cells: puzzle.cells.map(row => row.map(c => ({ 
           ...c, 
+          // 変則モードの場合は通常の数字もクリア
+          number: puzzle.puzzleType === '変則' ? null : c.number,
           isRevealed: c.isRevealed || (c.isShaded && c.answerChar !== '') || !c.isShaded
         })))
       };
       setPuzzle(startPuzzle);
+    }
+
+    // 変則モードの場合、開始前の sharedCells を退避する
+    if (puzzle.puzzleType === '変則') {
+      const info = calculateIrregularInfo(puzzle);
+      setAutoSolveSharedCells(info.sharedCells);
+    } else {
+      setAutoSolveSharedCells({});
     }
 
     setSolverLogs([]);
@@ -1404,6 +1419,7 @@ function App() {
     } finally {
       setIsSolving(false);
       setIsBacktracking(false);
+      setAutoSolveSharedCells({});
     }
   };
 
@@ -2663,7 +2679,7 @@ function App() {
                         boardFontFamily={puzzle.boardFontFamily || ''}
                         isNumbersHidden={puzzle.isNumbersHidden}
                         isIrregularNumbersDisplay={puzzle.isIrregularNumbersDisplay}
-                        sharedCells={irregularInfo.sharedCells}
+                        sharedCells={isSolving ? autoSolveSharedCells : irregularInfo.sharedCells}
                         highlightedDrawnCells={highlightedDrawnCells}
                         completedWords={completedWords}
                         currentSolveNumber={currentSolveNumber}
