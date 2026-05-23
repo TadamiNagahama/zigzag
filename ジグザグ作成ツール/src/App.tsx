@@ -2176,8 +2176,8 @@ function App() {
                     )}
                   </div>
 
-                  {/* 変則モードのエラー表示 */}
-                  {puzzle.puzzleType === '変則' && puzzle.isIrregularNumbersDisplay && irregularInfo.errors.length > 0 && (
+                  {/* 変則モードのエラー表示 (問題面でのみ表示) */}
+                  {puzzle.puzzleType === '変則' && appMode !== 'answer' && puzzle.isIrregularNumbersDisplay && irregularInfo.errors.length > 0 && (
                     <div style={{
                       marginBottom: '16px',
                       padding: '8px',
