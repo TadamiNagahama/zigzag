@@ -328,6 +328,7 @@ function App() {
   const [solveCandidateIndex, setSolveCandidateIndex] = useState(0);
 
   const [isSolving, setIsSolving] = useState(false);
+  const [solveStartNumbers, setSolveStartNumbers] = useState<number[] | null>(null);
   const [autoSolveSharedCells, setAutoSolveSharedCells] = useState<Record<string, number[]>>({});
   const [isBacktracking, setIsBacktracking] = useState(false);
   const [solveProgressCount, setSolveProgressCount] = useState(0);
@@ -1260,6 +1261,7 @@ function App() {
 
   const runAutoSolve = async (resetBoard: boolean, findAlternative: boolean = false, firstSolutionCells?: Cell[][]) => {
     setShowSolveChoice(false);
+    setSolveStartNumbers(numbers);
     const originalCells = puzzle.cells; // 原稿の完全退避
 
     let startPuzzle = puzzle;
@@ -1433,6 +1435,7 @@ function App() {
       setIsSolving(false);
       setIsBacktracking(false);
       setAutoSolveSharedCells({});
+      setSolveStartNumbers(null);
     }
   };
 
@@ -1951,7 +1954,7 @@ function App() {
         return () => window.removeEventListener('click', closeMenu);
       }, []);
 
-  const numbers = Array.from(puzzle.cells.reduce((acc, row) => {
+  const numbers = (isSolving && solveStartNumbers) ? solveStartNumbers : Array.from(puzzle.cells.reduce((acc, row) => {
     row.forEach(cell => {
       if (cell.number !== null) acc.add(cell.number);
     });
