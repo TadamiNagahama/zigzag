@@ -1314,8 +1314,10 @@ function App() {
     }
 
     // 変則モードの場合、開始前の sharedCells を退避する
+    let sharedCellsToPass: Record<string, number[]> | undefined = undefined;
     if (puzzle.puzzleType === '変則') {
       const info = calculateIrregularInfo(puzzle);
+      sharedCellsToPass = info.sharedCells;
       setAutoSolveSharedCells(info.sharedCells);
     } else {
       setAutoSolveSharedCells({});
@@ -1372,7 +1374,7 @@ function App() {
         () => setIsBacktracking(true),
         () => setIsBacktracking(false),
         (count) => setSolveProgressCount(count),
-        autoSolveSharedCells
+        sharedCellsToPass
       );
 
       if (result.success) {
