@@ -1268,7 +1268,9 @@ function App() {
         ...puzzle,
         cells: puzzle.cells.map(row => row.map(c => ({ 
           ...c, 
-          answerChar: '', 
+          // 変則モードの場合はオリジナルの answerChar を残す（getIrregularSharedCellsで経路計算するため）。
+          // それ以外の場合はクリア。
+          answerChar: puzzle.puzzleType === '変則' ? c.answerChar : '', 
           isRevealed: !c.isShaded // 網掛け以外は表示、網掛けは非表示
         })))
       };
@@ -1276,6 +1278,7 @@ function App() {
         ...startPuzzle,
         cells: startPuzzle.cells.map(row => row.map(c => ({
           ...c,
+          answerChar: '', // 表示用は常にクリア
           number: puzzle.puzzleType === '変則' ? null : c.number
         })))
       };
@@ -1287,7 +1290,7 @@ function App() {
         ...puzzle,
         cells: puzzle.cells.map(row => row.map(c => ({ 
           ...c, 
-          answerChar: '', 
+          answerChar: puzzle.puzzleType === '変則' ? c.answerChar : '', 
           isRevealed: !c.isShaded
         })))
       };
@@ -1305,6 +1308,7 @@ function App() {
         ...startPuzzle,
         cells: startPuzzle.cells.map(row => row.map(c => ({
           ...c,
+          answerChar: '', // 表示用は常にクリア
           number: puzzle.puzzleType === '変則' ? null : c.number
         })))
       };
