@@ -88,7 +88,8 @@ export async function solveZigzagAsync(
   checkCancelled?: () => boolean,
   onBacktrackStart?: () => void,
   onBacktrackEnd?: () => void,
-  onProgress?: (count: number) => void
+  onProgress?: (count: number) => void,
+  irregularSharedCells?: Record<string, number[]>
 ): Promise<SolveResult> {
   const log = (msg: string) => {
     if (onLog) onLog(msg);
@@ -220,7 +221,7 @@ export async function solveZigzagAsync(
     return finalSharedCells;
   };
 
-  const sharedCells = getIrregularSharedCells();
+  const sharedCells = irregularSharedCells || getIrregularSharedCells();
 
   // 現在の状態をコピーして保持
   // 超モード（網掛け）かつ未開示の場合、原稿の数字と文字を消去してカンニングを防止する
