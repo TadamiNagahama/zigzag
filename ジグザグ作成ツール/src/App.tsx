@@ -1269,12 +1269,17 @@ function App() {
         cells: puzzle.cells.map(row => row.map(c => ({ 
           ...c, 
           answerChar: '', 
-          // 変則モードの場合は通常の数字もクリア
-          number: puzzle.puzzleType === '変則' ? null : c.number,
           isRevealed: !c.isShaded // 網掛け以外は表示、網掛けは非表示
         })))
       };
-      setPuzzle(startPuzzle);
+      const displayStartPuzzle = {
+        ...startPuzzle,
+        cells: startPuzzle.cells.map(row => row.map(c => ({
+          ...c,
+          number: puzzle.puzzleType === '変則' ? null : c.number
+        })))
+      };
+      setPuzzle(displayStartPuzzle);
     } else if (findAlternative && firstSolutionCells) {
       // 別解探索時は初期盤面として最初の解の「数字」等の状態を保つが、文字はそのままか消すか？
       // solveZigzagAsyncは内部で初期盤面（文字なし）から解き直すため、ここでは元の文字を消した盤面を渡す
@@ -1283,8 +1288,6 @@ function App() {
         cells: puzzle.cells.map(row => row.map(c => ({ 
           ...c, 
           answerChar: '', 
-          // 変則モードの場合は通常の数字もクリア
-          number: puzzle.puzzleType === '変則' ? null : c.number,
           isRevealed: !c.isShaded
         })))
       };
@@ -1295,12 +1298,17 @@ function App() {
         ...puzzle,
         cells: puzzle.cells.map(row => row.map(c => ({ 
           ...c, 
-          // 変則モードの場合は通常の数字もクリア
-          number: puzzle.puzzleType === '変則' ? null : c.number,
           isRevealed: c.isRevealed || (c.isShaded && c.answerChar !== '') || !c.isShaded
         })))
       };
-      setPuzzle(startPuzzle);
+      const displayStartPuzzle = {
+        ...startPuzzle,
+        cells: startPuzzle.cells.map(row => row.map(c => ({
+          ...c,
+          number: puzzle.puzzleType === '変則' ? null : c.number
+        })))
+      };
+      setPuzzle(displayStartPuzzle);
     }
 
     // 変則モードの場合、開始前の sharedCells を退避する
