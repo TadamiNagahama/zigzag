@@ -3585,11 +3585,8 @@ export async function solveZigzagAsync(
     await reportStep();
   }
 
-  // 最終盤面の組み立て：余計な体裁（原稿データの再コピー）を排除し、推論結果のみを反映させる
-  // const finalCells = currentCells.map((row, y) => row.map((c, x) => ({ ...cells[y][x] })));
-  forceSyncWordFixedNodes();
-
-  const finalCells = currentCells.map((row) => row.map((c) => ({ ...c })));
+  // 元のパズルのセル（cells）をベースにして、元の数字（number）等の情報を破壊せずに復元する
+  const finalCells = currentCells.map((row, y) => row.map((_, x) => ({ ...cells[y][x] })));
   const currGridChars = getGridChars();
   
   // Wリスト用の検証と確定文字マッピング取得
