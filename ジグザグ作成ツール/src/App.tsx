@@ -723,12 +723,20 @@ function App() {
     localStorage.setItem('zigzag_cloud_autosave_setting', cloudAutoSave.toString());
   }, [cloudAutoSave]);
 
-  // 解答面に遷移した際、変則数字表示を自動的にオフにする
+  // 解答面に遷移した際、変則モードであれば変則数字表示をオンにし、それ以外ならオフにする
   useEffect(() => {
-    if (appMode === 'answer' && puzzle.isIrregularNumbersDisplay) {
-      toggleIrregularNumbersDisplay();
+    if (appMode === 'answer') {
+      if (puzzle.puzzleType === '変則') {
+        if (!puzzle.isIrregularNumbersDisplay) {
+          toggleIrregularNumbersDisplay();
+        }
+      } else {
+        if (puzzle.isIrregularNumbersDisplay) {
+          toggleIrregularNumbersDisplay();
+        }
+      }
     }
-  }, [appMode, puzzle.isIrregularNumbersDisplay, toggleIrregularNumbersDisplay]);
+  }, [appMode, puzzle.puzzleType, puzzle.isIrregularNumbersDisplay, toggleIrregularNumbersDisplay]);
 
   // Firestore の system/settings からログ表示フラグを取得
   useEffect(() => {

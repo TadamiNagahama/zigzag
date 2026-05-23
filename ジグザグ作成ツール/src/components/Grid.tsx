@@ -200,21 +200,20 @@ export const Grid: React.FC<GridProps> = ({ cells, onCellClick, onCellMouseDown,
               {/* Layer 3.5: 変則モードの共有数字 */}
               {isIrregularNumbersDisplay && sharedCells[`${cell.x},${cell.y}`] && (() => {
                 if (appMode === 'answer') {
-                  // 解答面では、数字マスとして確定している場合は変則数字は非表示
-                  if (cell.number) return null;
-                  const hasChar = !!(cell.answerChar || cell.char);
+                  // 解答面では、数字マスとして確定しているか、または文字が決まっている場合、右上寄せグレー70%で表示し、重なりを避ける
+                  const hasCharOrNum = !!(cell.answerChar || cell.char || cell.number);
                   return (
                     <div style={{
                       position: 'absolute',
                       top: '1px',
-                      // 文字が決まっていれば右上寄せ、未定なら左上寄せ
-                      right: hasChar ? '1px' : 'auto',
-                      left: hasChar ? 'auto' : '1px',
-                      // 文字が決まっていれば70%に縮小、未定なら標準サイズ
-                      fontSize: hasChar ? `${cellSize * 0.3 * 0.7}px` : `${cellSize * 0.3}px`,
+                      // 文字または数字が決まっていれば右上寄せ、未定なら左上寄せ
+                      right: hasCharOrNum ? '1px' : 'auto',
+                      left: hasCharOrNum ? 'auto' : '1px',
+                      // 文字または数字が決まっていれば70%に縮小、未定なら標準サイズ
+                      fontSize: hasCharOrNum ? `${cellSize * 0.3 * 0.7}px` : `${cellSize * 0.3}px`,
                       lineHeight: '1',
-                      // 文字が決まっていればグレー、未定なら標準色
-                      color: hasChar ? '#9ca3af' : 'var(--text-main)',
+                      // 文字または数字が決まっていればグレー、未定なら標準色
+                      color: hasCharOrNum ? '#9ca3af' : 'var(--text-main)',
                       fontWeight: 'bold',
                       zIndex: 4,
                       pointerEvents: 'none',
