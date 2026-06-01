@@ -51,6 +51,20 @@ const playBuzzer = () => {
   oscillator.stop(context.currentTime + 0.3);
 };
 
+const getTitleWidth = (title: string) => {
+  if (!title) return '10em';
+  let width = 0;
+  for (let i = 0; i < title.length; i++) {
+    const code = title.charCodeAt(i);
+    if (code >= 0 && code <= 128) {
+      width += 0.55;
+    } else {
+      width += 1.05;
+    }
+  }
+  return `${Math.max(10, width)}em`;
+};
+
 function App() {
   const {
     puzzle,
@@ -102,14 +116,20 @@ function App() {
     setTimeout(() => {
       const scrollArea = document.getElementById('board-scroll-area');
       const content = document.getElementById('board-content-wrapper');
+      const actualPuzzle = document.getElementById('actual-puzzle-contents');
       if (!scrollArea || !content) return;
 
       const availW = scrollArea.clientWidth - 40;
       const availH = scrollArea.clientHeight - 40;
 
-      const rect = content.getBoundingClientRect();
-      const naturalW = rect.width / zoom;
-      const naturalH = rect.height / zoom;
+      // 盤面の実際のコンテナを取得
+      const gridContainer = actualPuzzle?.querySelector('.grid-container') as HTMLElement | null;
+
+      // ズームの影響を受けない offsetWidth / offsetHeight を使用して本来のサイズを計算
+      // 横幅の基準：gridContainer が存在すればその offsetWidth、なければ content の offsetWidth
+      const naturalW = gridContainer ? gridContainer.offsetWidth : (actualPuzzle ? actualPuzzle.offsetWidth : content.offsetWidth);
+      // 高さの基準：content.offsetHeight（タイトルを含めた全体の高さ）
+      const naturalH = content.offsetHeight;
 
       if (naturalW > 0 && naturalH > 0) {
         const scaleW = availW / naturalW;
@@ -294,7 +314,9 @@ function App() {
     return { sharedCells: finalSharedCells, errors };
   };
 
-  const irregularInfo = useMemo(() => calculateIrregularInfo(puzzle), [puzzle]);
+  const [irregularSharedCells, setIrregularSharedCells] = useState<Record<string, number[]>>({});
+  const [irregularErrors, setIrregularErrors] = useState<string[]>([]);
+  const lastPuzzleKeyRef = useRef<string>('');
   const [pendingResize, setPendingResize] = useState<{ h: number, w: number } | null>(null);
   const editingWordRef = useRef<number | null>(null);
 
@@ -305,6 +327,26 @@ function App() {
   const [composingText, setComposingText] = useState('');
   const hiddenInputRef = useRef<HTMLInputElement>(null);
   const userActionRef = useRef(false);
+
+  // 変則モード用の共有マス計算キャッシュの更新制御
+  useEffect(() => {
+    if (puzzle.puzzleType !== '変則') {
+      setIrregularSharedCells({});
+      setIrregularErrors([]);
+      return;
+    }
+
+    const currentKey = `${puzzle.id || 'new'}-${puzzle.updatedAt}-${puzzle.title}-${puzzle.width}x${puzzle.height}`;
+    const isPuzzleChanged = currentKey !== lastPuzzleKeyRef.current;
+
+    // パズル自体が変更された、または編集モード（'edit'）の時のみ再計算してキャッシュを更新する
+    if (isPuzzleChanged || appMode === 'edit') {
+      const info = calculateIrregularInfo(puzzle);
+      setIrregularSharedCells(info.sharedCells);
+      setIrregularErrors(info.errors);
+      lastPuzzleKeyRef.current = currentKey;
+    }
+  }, [puzzle, appMode]);
 
   const [user, setUser] = useState<User | null>(null);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
@@ -1107,10 +1149,11 @@ function App() {
       if (editMode === 'wall') {
         toggleCellType(x, y);
       } else if (editMode === 'number') {
-        if (puzzle.puzzleType === 'ナンバーレス') {
+        if (puzzle.puzzleType === 'ナンバーレス' || puzzle.puzzleType === '部分ナンバーレス') {
           const cell = puzzle.cells[y][x];
           if (!cell.isNumbered && !cell.char) {
             toggleNumberFlag(x, y);
+            setFocusedCell(null);
           } else if (cell.isNumbered) {
             toggleNumberFlag(x, y);
             setFocusedCell({ x, y });
@@ -1318,9 +1361,8 @@ function App() {
     // 変則モードの場合、開始前の sharedCells を退避する
     let sharedCellsToPass: Record<string, number[]> | undefined = undefined;
     if (puzzle.puzzleType === '変則') {
-      const info = calculateIrregularInfo(puzzle);
-      sharedCellsToPass = info.sharedCells;
-      setAutoSolveSharedCells(info.sharedCells);
+      sharedCellsToPass = irregularSharedCells;
+      setAutoSolveSharedCells(irregularSharedCells);
     } else {
       setAutoSolveSharedCells({});
     }
@@ -1343,6 +1385,23 @@ function App() {
     isCancelledRef.current = false;
     setIsBacktracking(false);
     setSolveProgressCount(0);
+    const askToRestore = (msg: string): Promise<boolean> => {
+      return new Promise((resolve) => {
+        setConfirmAction({
+          message: `${msg}\n盤面を自動解答前の状態に戻しますか？`,
+          onConfirm: () => {
+            setConfirmAction(null);
+            resolve(true);
+          },
+          onCancel: () => {
+            setConfirmAction(null);
+            resolve(false);
+          },
+          confirmText: 'はい（解答前に戻す）',
+          cancelText: 'いいえ（この盤面のまま）'
+        } as any);
+      });
+    };
 
     try {
       const confirmAsync = (msg: string): Promise<boolean> => {
@@ -1395,42 +1454,74 @@ function App() {
           updatedAt: Date.now()
         }));
         setPuzzle(solvedPuzzle);
-        const shouldSuppressSuccess = result.isBacktracked || findAlternative;
-        validateManuscript(solvedPuzzle, shouldSuppressSuccess);
+        validateManuscript(solvedPuzzle, true);
 
         if (findAlternative) {
           if (result.isAlternativeFound) {
-            setAlertMessage('別解を見つけました。さきほどの解と異なるマスに色を付けてあります。');
+            setAlertMessage('別解がありました。別解になるマスを色つきマスで示します');
           } else if (result.isUnique) {
-            setAlertMessage('総当たりが終了しました。唯一解でした。');
+            setAlertMessage('唯一解でした');
           }
-        } else if (result.isBacktracked) {
-          // バックトラックで解を見つけた場合、別解を探すか尋ねる
+        } else if (result.solveMethod === 'logical') {
+          // 1で解けたときは唯一解確定
+          setAlertMessage('解けました。唯一解です。');
+        } else if (result.solveMethod === 'group' || result.solveMethod === 'full') {
+          const methodStr = result.solveMethod === 'group' ? 'グループ総当たり' : 'マス総当たり';
           setConfirmAction({
-            message: '総当たりで解を見つけました。\n他に解があるかもしれません。探しますか？\n（「はい」の場合は別解を探し、「いいえ」の場合は現在の盤面で終了します）',
+            message: `${methodStr}で解けました。別解を探しますか？`,
             onConfirm: () => {
               setConfirmAction(null);
               runAutoSolve(false, true, result.solvedCells);
             },
             onCancel: () => setConfirmAction(null),
-            confirmText: 'はい。別解を探す',
-            cancelText: 'いいえ。解析を終了する'
+            confirmText: 'はい',
+            cancelText: 'いいえ'
           } as any);
         }
       } else {
-        // 失敗：結果をそのまま反映
-        pushPuzzle(prev => ({
-          ...prev,
-          cells: result.solvedCells,
-          updatedAt: Date.now()
-        }));
-        setAlertMessage(result.message);
+        // 失敗：確認ダイアログを表示して戻すか決定
+        if (result.solveMethod === 'full') {
+          setAlertMessage('解がありませんでした。解けない問題です');
+          setPuzzle(prev => ({ ...prev, cells: originalCells }));
+        } else {
+          const failMsg = '解けずに終了します。盤面を自動解答前の状態に戻しますか？';
+          const shouldRestore = await askToRestore(failMsg);
+          if (shouldRestore) {
+            setPuzzle(prev => ({
+              ...prev,
+              cells: originalCells
+            }));
+          } else {
+            pushPuzzle(prev => ({
+              ...prev,
+              cells: result.solvedCells,
+              updatedAt: Date.now()
+            }));
+            setPuzzle(prev => ({
+              ...prev,
+              cells: result.solvedCells
+            }));
+          }
+        }
       }
     } catch (error: any) {
       console.error('AutoSolve Error:', error);
-      // エラー時：完全に元の状態に戻す
-      setPuzzle(prev => ({ ...prev, cells: originalCells }));
-      setAlertMessage(`エラーが発生しました: ${error.message}`);
+      if (error.message === 'cancelled') {
+        const shouldRestore = await askToRestore('解けずに終了します。盤面を自動解答前の状態に戻しますか？');
+        if (shouldRestore) {
+          setPuzzle(prev => ({ ...prev, cells: originalCells }));
+        } else {
+          pushPuzzle(prev => ({
+            ...prev,
+            cells: prev.cells,
+            updatedAt: Date.now()
+          }));
+        }
+      } else {
+        // エラー時：完全に元の状態に戻す
+        setPuzzle(prev => ({ ...prev, cells: originalCells }));
+        setAlertMessage(`エラーが発生しました: ${error.message}`);
+      }
     } finally {
       setIsSolving(false);
       setIsBacktracking(false);
@@ -2185,7 +2276,7 @@ function App() {
                   </div>
 
                   {/* 変則モードのエラー表示 (問題面でのみ表示) */}
-                  {puzzle.puzzleType === '変則' && appMode !== 'answer' && puzzle.isIrregularNumbersDisplay && irregularInfo.errors.length > 0 && (
+                  {puzzle.puzzleType === '変則' && appMode !== 'answer' && puzzle.isIrregularNumbersDisplay && irregularErrors.length > 0 && (
                     <div style={{
                       marginBottom: '16px',
                       padding: '8px',
@@ -2197,7 +2288,7 @@ function App() {
                     }}>
                       <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>共有マスの計算エラー:</div>
                       <ul style={{ margin: 0, paddingLeft: '16px' }}>
-                        {irregularInfo.errors.map((err, i) => (
+                        {irregularErrors.map((err, i) => (
                           <li key={i}>{err}</li>
                         ))}
                       </ul>
@@ -2253,17 +2344,41 @@ function App() {
                   </div>
 
                   <div style={{ padding: '0' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0' }}>
-                      <h4 style={{ margin: 0, fontSize: '0.9rem', color: 'var(--primary-color)' }}>単語リスト</h4>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', marginBottom: '0' }}>
+                      <h4 style={{ margin: 0, fontSize: '0.9rem', color: 'var(--primary-color)', whiteSpace: 'nowrap' }}>単語リスト</h4>
                       {(puzzle.puzzleType === 'ナンバーレス' || puzzle.puzzleType === '部分ナンバーレス') && (
-                        <button
-                          className="btn-secondary"
-                          style={{ fontSize: '0.7rem', padding: '2px 6px' }}
-                          onClick={() => setWordListOrderMode(puzzle.wordListOrderMode === 'alphabetical' ? 'numerical' : 'alphabetical')}
-                          title={puzzle.wordListOrderMode === 'alphabetical' ? "数字順に並べ替え" : "あいうえお順に並べ替え"}
-                        >
-                          {puzzle.wordListOrderMode === 'alphabetical' ? '数字順' : 'あいうえお順'}
-                        </button>
+                        <>
+                          <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', marginLeft: '2px', whiteSpace: 'nowrap' }}>
+                            {puzzle.wordListOrderMode === 'alphabetical' ? '50音表示中' : '数字順表示中'}
+                          </span>
+                          <div style={{ marginLeft: 'auto', display: 'flex', gap: '4px', alignItems: 'center' }}>
+                            <button
+                              className="btn-secondary"
+                              style={{ fontSize: '0.58rem', padding: '1px 4px', whiteSpace: 'nowrap' }}
+                              onClick={() => setWordListOrderMode(puzzle.wordListOrderMode === 'alphabetical' ? 'numerical' : 'alphabetical')}
+                              title={puzzle.wordListOrderMode === 'alphabetical' ? "数字順に表示" : "50音順に表示"}
+                            >
+                              {puzzle.wordListOrderMode === 'alphabetical' ? '数字順表示へ' : '50音表示へ'}
+                            </button>
+                            {puzzle.wordListOrderMode === 'alphabetical' && (
+                              <button
+                                className="btn-secondary"
+                                style={{ 
+                                  fontSize: '0.58rem', 
+                                  padding: '1px 4px', 
+                                  whiteSpace: 'nowrap',
+                                  backgroundColor: 'var(--primary-light, #e0e7ff)', 
+                                  color: 'var(--primary-color, #4f46e5)', 
+                                  borderColor: 'var(--primary-color, #4f46e5)' 
+                                }}
+                                onClick={() => setWordListOrderMode('alphabetical', true)}
+                                title="現在の単語リストを50音順に再整列します"
+                              >
+                                50音順並替
+                              </button>
+                            )}
+                          </div>
+                        </>
                       )}
                     </div>
 
@@ -2643,7 +2758,9 @@ function App() {
                     display: 'flex',
                     flexDirection: 'column',
                     alignItems: 'center',
-                    width: 'fit-content',
+                    width: `calc(95% / ${zoom})`,
+                    maxWidth: `calc(1200px / ${zoom})`,
+                    minWidth: 'fit-content',
                     marginTop: '0',
                     paddingBottom: '15px'
                   }}>
@@ -2654,53 +2771,61 @@ function App() {
                       placeholder="タイトルを入力..."
                       style={{
                         width: '100%',
+                        minWidth: getTitleWidth(puzzle.boardTitle || ''),
                         textAlign: 'center',
-                        fontSize: '1rem',
+                        fontSize: '1.25rem',
                         fontWeight: 'bold',
                         border: 'none',
                         background: 'transparent',
-                        marginBottom: '0.2rem',
+                        marginBottom: '1rem',
                         outline: 'none',
                         color: 'var(--primary-color)'
                       }}
                     />
-                    <AnswerArea
-                      groups={alphabetGroups}
-                      cellSize={baseCellSize}
-                      charMap={appMode === 'answer' ? answerChars : {}}
-                      isRemainingAnswer={puzzle.isRemainingAnswer}
-                      remainingAnswerWord={appMode === 'answer' ? (puzzle.remainingAnswerWord || '') : ''}
-                      list2={puzzle.wordList2 || []}
-                      onSelectRemaining={setRemainingAnswerWord}
-                      isEditingSpaces={isEditingSpaces}
-                      answerColumnSpaces={puzzle.answerColumnSpaces}
-                      onToggleSpace={toggleAnswerColumnSpace}
-                      onToggleEditing={() => setIsEditingSpaces(!isEditingSpaces)}
-                    />
-                    <div style={{ marginTop: '0.4rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <Grid
-                        cells={puzzle.cells}
-                        onCellClick={handleCellClick}
-                        onCellMouseDown={handleCellMouseDown}
-                        onCellRightClick={handleCellRightClick}
-                        onDragSelection={handleDragSelection}
-                        onDragPath={handleDragPath}
+                    <div id="actual-puzzle-contents" style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      width: 'fit-content'
+                    }}>
+                      <AnswerArea
+                        groups={alphabetGroups}
                         cellSize={baseCellSize}
-                        appMode={appMode}
-                        focusedCell={focusedCell}
-                        composingText={composingText}
-                        shadingColor={puzzle.shadingColor}
-                        wordList={puzzle.wordList}
-                        boardFontWeight={puzzle.boardFontWeight || 'normal'}
-                        boardFontFamily={puzzle.boardFontFamily || ''}
-                        isNumbersHidden={puzzle.isNumbersHidden}
-                        isIrregularNumbersDisplay={puzzle.isIrregularNumbersDisplay}
-                        sharedCells={isSolving ? autoSolveSharedCells : irregularInfo.sharedCells}
-                        highlightedDrawnCells={highlightedDrawnCells}
-                        completedWords={completedWords}
-                        currentSolveNumber={currentSolveNumber}
-                        isSolving={isSolving}
+                        charMap={appMode === 'answer' ? answerChars : {}}
+                        isRemainingAnswer={puzzle.isRemainingAnswer}
+                        remainingAnswerWord={appMode === 'answer' ? (puzzle.remainingAnswerWord || '') : ''}
+                        list2={puzzle.wordList2 || []}
+                        onSelectRemaining={setRemainingAnswerWord}
+                        isEditingSpaces={isEditingSpaces}
+                        answerColumnSpaces={puzzle.answerColumnSpaces}
+                        onToggleSpace={toggleAnswerColumnSpace}
+                        onToggleEditing={() => setIsEditingSpaces(!isEditingSpaces)}
                       />
+                      <div style={{ marginTop: '0.4rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Grid
+                          cells={puzzle.cells}
+                          onCellClick={handleCellClick}
+                          onCellMouseDown={handleCellMouseDown}
+                          onCellRightClick={handleCellRightClick}
+                          onDragSelection={handleDragSelection}
+                          onDragPath={handleDragPath}
+                          cellSize={baseCellSize}
+                          appMode={appMode}
+                          focusedCell={focusedCell}
+                          composingText={composingText}
+                          shadingColor={puzzle.shadingColor}
+                          wordList={puzzle.wordList}
+                          boardFontWeight={puzzle.boardFontWeight || 'normal'}
+                          boardFontFamily={puzzle.boardFontFamily || ''}
+                          isNumbersHidden={puzzle.isNumbersHidden}
+                          isIrregularNumbersDisplay={puzzle.isIrregularNumbersDisplay}
+                          sharedCells={isSolving ? autoSolveSharedCells : irregularSharedCells}
+                          highlightedDrawnCells={highlightedDrawnCells}
+                          completedWords={completedWords}
+                          currentSolveNumber={currentSolveNumber}
+                          isSolving={isSolving}
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2884,7 +3009,7 @@ function App() {
               options={printOptions}
               alphabetGroups={alphabetGroups}
               answerChars={answerChars}
-              sharedCells={irregularInfo.sharedCells}
+              sharedCells={irregularSharedCells}
             />
           )}
 

@@ -35,6 +35,7 @@ export interface SolveResult {
   message: string;
   solvedCells: Cell[][];
   isBacktracked?: boolean;
+  solveMethod?: 'logical' | 'group' | 'full';
   isAlternativeFound?: boolean;
   isUnique?: boolean;
   remainingWord?: string;
@@ -132,96 +133,7 @@ export async function solveZigzagAsync(
 
   const isIrregularMode = puzzle.puzzleType === '変則';
 
-  // 変則モード用の共有マス計算ロジック（解法で必要になるため）
-  const getIrregularSharedCells = (): Record<string, number[]> => {
-    if (!isIrregularMode) return {};
-    const sharedCellsMap: Record<string, number[]> = {};
-    const usedNumbers = new Set<number>();
-    
-    puzzle.cells.forEach(row => row.forEach(cell => {
-      if (cell.number !== null) usedNumbers.add(cell.number);
-    }));
-
-    const findAllPaths = (word: string, x: number, y: number, visited: Set<string>, currentPath: { x: number, y: number }[]): { x: number, y: number }[][] => {
-      if (x < 0 || x >= width || y < 0 || y >= height) return [];
-      const cell = puzzle.cells[y][x];
-      const px = cell.mergedParent ? cell.mergedParent.x : x;
-      const py = cell.mergedParent ? cell.mergedParent.y : y;
-      const parentCell = puzzle.cells[py][px];
-      if (parentCell.type !== 'normal') return [];
-      const currentChar = parentCell.char || parentCell.answerChar;
-      if (currentChar !== word[0]) return [];
-      const key = `${px},${py}`;
-      if (visited.has(key)) return [];
-      const newPath = [...currentPath, { x: px, y: py }];
-      if (word.length === 1) return [newPath];
-      const newVisited = new Set(visited);
-      newVisited.add(key);
-      const res: { x: number, y: number }[][] = [];
-      const groupCells: { x: number, y: number }[] = [];
-      if (parentCell.mergedSize) {
-        for (let dy = 0; dy < parentCell.mergedSize.height; dy++) {
-          for (let dx = 0; dx < parentCell.mergedSize.width; dx++) {
-            groupCells.push({ x: px + dx, y: py + dy });
-          }
-        }
-      } else {
-        groupCells.push({ x: px, y: py });
-      }
-      const neighbors = [[0, 1], [0, -1], [1, 0], [-1, 0]];
-      for (const gc of groupCells) {
-        for (const [dx, dy] of neighbors) {
-          const nx = gc.x + dx;
-          const ny = gc.y + dy;
-          if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
-          const nCell = puzzle.cells[ny][nx];
-          if (nCell.type !== 'normal') continue;
-          const npx = nCell.mergedParent ? nCell.mergedParent.x : nx;
-          const npy = nCell.mergedParent ? nCell.mergedParent.y : ny;
-          if (npx === px && npy === py) continue;
-          const sub = findAllPaths(word.slice(1), nx, ny, newVisited, newPath);
-          res.push(...sub);
-          if (res.length >= 2) break;
-        }
-        if (res.length >= 2) break;
-      }
-      return res;
-    };
-
-    for (const num of Array.from(usedNumbers).sort((a, b) => a - b)) {
-      const word = puzzle.wordList[num];
-      if (!word || word.trim() === '') continue;
-      let startPos: { x: number, y: number } | null = null;
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          if (puzzle.cells[y][x].number === num) {
-            startPos = { x, y };
-            break;
-          }
-        }
-        if (startPos) break;
-      }
-      if (!startPos) continue;
-      const paths = findAllPaths(word, startPos.x, startPos.y, new Set(), []);
-      if (paths.length === 1) {
-        paths[0].forEach(pCoord => {
-          const k = `${pCoord.x},${pCoord.y}`;
-          if (!sharedCellsMap[k]) sharedCellsMap[k] = [];
-          if (!sharedCellsMap[k].includes(num)) sharedCellsMap[k].push(num);
-        });
-      }
-    }
-
-    const finalSharedCells: Record<string, number[]> = {};
-    Object.entries(sharedCellsMap).forEach(([k, nums]) => {
-      if (nums.length >= 2) {
-        finalSharedCells[k] = nums.sort((a, b) => a - b);
-      }
-    });
-    return finalSharedCells;
-  };
-
-  const sharedCells = irregularSharedCells || getIrregularSharedCells();
+  const sharedCells = irregularSharedCells || {};
 
   // 現在の状態をコピーして保持
   // 超モード（網掛け）かつ未開示の場合、原稿の数字と文字を消去してカンニングを防止する
@@ -344,6 +256,10 @@ export async function solveZigzagAsync(
         // 数字の同期 (表示用)
         if (node.logiNumber !== null) {
           cell.number = node.logiNumber;
+        } else {
+          if (isChoMode || isIrregularMode) {
+            cell.number = null;
+          }
         }
       }
       await onStep(displayCells);
@@ -395,8 +311,8 @@ export async function solveZigzagAsync(
         }
         logiNumber = null;
       } else {
-        isFixed = isActuallyShaded 
-          ? (hasInitialChar || !!isInitiallyRevealed) 
+        isFixed = isActuallyShaded
+          ? (hasInitialChar || !!isInitiallyRevealed)
           : (cell.char !== '' || (cell.number !== null && !(puzzle.isWListStar && puzzle.wordStarList?.[cell.number])));
         currentChar = isActuallyShaded ? (hasInitialChar ? cell.answerChar : '') : cell.char;
         logiNumber = isActuallyShaded ? (isInitiallyRevealed ? cell.number : null) : cell.number;
@@ -460,6 +376,23 @@ export async function solveZigzagAsync(
       }
     }
   }
+
+  // 読書順のインデックスマップを作成
+  const scanNodes: SolverNode[] = [];
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const cell = cells[y][x];
+      const isScanTarget = isChoMode
+        ? ((cell.number !== null && !cell.isShaded) || cell.isShaded)
+        : (cell.type === 'normal');
+      if (isScanTarget) {
+        const node = nodeMap.get(`${x},${y}`);
+        if (node) scanNodes.push(node);
+      }
+    }
+  }
+  const nodeIdxMap = new Map<string, number>();
+  scanNodes.forEach((node, idx) => nodeIdxMap.set(node.id, idx));
 
   // 2.5 Wリスト用の網掛けブロック抽出
   interface ShadedBlock {
@@ -584,21 +517,21 @@ export async function solveZigzagAsync(
         }
         return success;
       }
-      
+
       const word = words[wordIdx];
-      
+
       for (const startNode of blockNodes) {
         const startChar = currentGrid[startNode.id];
         if (startChar && startChar !== word[0]) continue;
-        
+
         const path: string[] = [startNode.id];
         const visited = new Set<string>([startNode.id]);
-        
+
         const findPaths = (currId: string, charIdx: number): boolean => {
           if (charIdx === word.length) {
             const addedNodes: string[] = [];
             const prevGridValues: { [id: string]: string | undefined } = {};
-            
+
             for (let i = 0; i < path.length; i++) {
               const nid = path[i];
               const c = word[i];
@@ -613,11 +546,11 @@ export async function solveZigzagAsync(
                 prevGridValues[nid] = currentGrid[nid];
               }
             }
-            
+
             if (dfsAssign(wordIdx + 1)) {
               return true;
             }
-            
+
             for (const nid of addedNodes) {
               coveredNodes.delete(nid);
             }
@@ -631,15 +564,15 @@ export async function solveZigzagAsync(
             }
             return false;
           }
-          
+
           const currNode = nodeMap.get(currId)!;
           const nextChar = word[charIdx];
-          
+
           for (const neighborId of currNode.neighbors) {
             if (blockNodeIds.has(neighborId) && !visited.has(neighborId)) {
               const nGChar = currentGrid[neighborId];
               if (nGChar && nGChar !== nextChar) continue;
-              
+
               visited.add(neighborId);
               path.push(neighborId);
               if (findPaths(neighborId, charIdx + 1)) return true;
@@ -649,16 +582,16 @@ export async function solveZigzagAsync(
           }
           return false;
         };
-        
+
         const originalStartChar = currentGrid[startNode.id];
         currentGrid[startNode.id] = word[0];
         const startAdded = !coveredNodes.has(startNode.id);
         if (startAdded) coveredNodes.add(startNode.id);
-        
+
         if (findPaths(startNode.id, 1)) {
           return true;
         }
-        
+
         if (startAdded) coveredNodes.delete(startNode.id);
         if (originalStartChar === undefined) {
           delete currentGrid[startNode.id];
@@ -668,7 +601,7 @@ export async function solveZigzagAsync(
       }
       return false;
     };
-    
+
     const res = dfsAssign(0);
     return res;
   };
@@ -701,7 +634,7 @@ export async function solveZigzagAsync(
         if (blockNodeIds.has(neighborId) && !visited.has(neighborId)) {
           const nGChar = gridChars[neighborId];
           if (nGChar && nGChar !== targetChar) continue;
-          
+
           visited.add(neighborId);
           path.push(neighborId);
           findLeftPaths(neighborId, idx - 1, path);
@@ -759,9 +692,23 @@ export async function solveZigzagAsync(
     return false;
   };
 
-  const canNodeAcceptChar = (node: SolverNode, char: string): boolean => {
+  const canNodeAcceptChar = (node: SolverNode, char: string, wNum?: number): boolean => {
     if (node.isFixed) {
       return node.currentChar === char;
+    }
+
+    // 予約（Reservation）による進入制限チェック
+    if (node.reservedBy.size > 0) {
+      let allowed = false;
+      if (wNum !== undefined && node.reservedBy.has(wNum)) {
+        allowed = true;
+      }
+      if (!allowed && node.reservedChars.has(char)) {
+        allowed = true;
+      }
+      if (!allowed) {
+        return false;
+      }
     }
 
     // Wリスト用の網掛け侵入制限
@@ -771,7 +718,7 @@ export async function solveZigzagAsync(
         const block = shadedBlocks.find(b => b.nodeIds.has(node.id));
         if (block) {
           const list2Words = (puzzle.wordList2 || []).filter(w => w.trim() !== '');
-          
+
           const charInAnyWord = list2Words.some(w => w.includes(char));
           if (!charInAnyWord) {
             return false;
@@ -1086,7 +1033,7 @@ export async function solveZigzagAsync(
                 for (const nid of currNode.neighbors) {
                   if (used.has(nid)) continue;
                   const nb = nodeMap.get(nid)!;
-                  if (canNodeAcceptChar(nb, targetChar)) {
+                  if (canNodeAcceptChar(nb, targetChar, w.logiNumber)) {
                     used.add(nid);
                     pathNodes.push(nid);
                     dfsStar(nid, charIdx + 1);
@@ -1164,7 +1111,7 @@ export async function solveZigzagAsync(
             for (const nid of currNode.neighbors) {
               if (used.has(nid)) continue;
               const nb = nodeMap.get(nid)!;
-              if (canNodeAcceptChar(nb, targetChar)) {
+              if (canNodeAcceptChar(nb, targetChar, w.logiNumber)) {
                 used.add(nid);
                 pathNodes.push(nid);
                 dfsIrregular(nid, charIdx + 1);
@@ -1206,7 +1153,7 @@ export async function solveZigzagAsync(
           if (used.has(nid)) continue;
           if (nextFixedId && nid !== nextFixedId) continue;
           const nb = nodeMap.get(nid)!;
-          if (canNodeAcceptChar(nb, targetChar)) {
+          if (canNodeAcceptChar(nb, targetChar, w.logiNumber)) {
             if (!candidatesByPos.has(charIdx)) candidatesByPos.set(charIdx, new Set());
             candidatesByPos.get(charIdx)!.add(nid);
 
@@ -1303,7 +1250,7 @@ export async function solveZigzagAsync(
         const possibleNeighbors = currentNode.neighbors.filter(nid => {
           if (used.has(nid)) return false;
           const nb = nodeMap.get(nid)!;
-          return canNodeAcceptChar(nb, targetChar);
+          return canNodeAcceptChar(nb, targetChar, w.logiNumber);
         });
 
         if (possibleNeighbors.length === 1) {
@@ -1320,6 +1267,11 @@ export async function solveZigzagAsync(
       }
 
       if (await updateCommonNodes()) {
+        loopChanged = true;
+        overallChanged = true;
+      }
+
+      if (await executePhase4()) {
         loopChanged = true;
         overallChanged = true;
       }
@@ -1371,7 +1323,7 @@ export async function solveZigzagAsync(
           if (used.has(nid)) continue;
           if (nextFixedId && nid !== nextFixedId) continue;
           const nb = nodeMap.get(nid)!;
-          if (canNodeAcceptChar(nb, targetChar)) {
+          if (canNodeAcceptChar(nb, targetChar, w.logiNumber)) {
             used.add(nid);
             currentPath.push({ nid, char: targetChar });
             dfs(nid, charIdx + 1);
@@ -1389,10 +1341,13 @@ export async function solveZigzagAsync(
 
       for (const path of paths) {
         for (const step of path) {
-          nodeHits.set(step.nid, (nodeHits.get(step.nid) || 0) + 1);
-          if (!nodeChars.has(step.nid)) nodeChars.set(step.nid, new Set());
-          nodeChars.get(step.nid)!.add(step.char);
-          nodeMap.get(step.nid)!.candidates.add(step.char);
+          const node = nodeMap.get(step.nid)!;
+          if (!node.isFixed) {
+            nodeHits.set(step.nid, (nodeHits.get(step.nid) || 0) + 1);
+            if (!nodeChars.has(step.nid)) nodeChars.set(step.nid, new Set());
+            nodeChars.get(step.nid)!.add(step.char);
+            node.candidates.add(step.char);
+          }
         }
       }
 
@@ -1400,13 +1355,80 @@ export async function solveZigzagAsync(
         if (hits === paths.length) {
           const node = nodeMap.get(nid)!;
           const chars = nodeChars.get(nid)!;
-          if (chars.size === 1) {
+
+          if (chars.size > 1) {
+            if (!node.reservedBy.has(w.logiNumber)) {
+              node.reservedBy.add(w.logiNumber);
+              for (const char of chars) {
+                node.reservedChars.add(char);
+              }
+              log(`    [Phase5予約] マス ${getExcelCoords(node)} -> 単語 ${w.logiNumber} (${w.text}) / 必須文字: [ ${Array.from(chars).join(' ')} ]`);
+              changed = true;
+            }
+          } else if (chars.size === 1) {
             const char = Array.from(chars)[0];
             if (!node.isFixed) {
               fixNode(node, char);
               await reportStep();
               changed = true;
             }
+          }
+        }
+      }
+    }
+    return changed;
+  };
+
+  const executePhase4 = async (): Promise<boolean> => {
+    let changed = false;
+    const remainingWords = solverWords.filter(w => !w.isUsed);
+
+    for (let i = 0; i < remainingWords.length; i++) {
+      const w1 = remainingWords[i];
+      const fixedLen1 = getFixedLength(w1);
+      if (fixedLen1 === 0 || fixedLen1 === w1.length) continue;
+
+      const cands1 = wordCharCandidates.get(w1.logiNumber)?.get(fixedLen1);
+      if (!cands1 || cands1.size !== 2) continue;
+
+      const nodes1 = Array.from(cands1).map(nid => nodeMap.get(nid)!);
+      if (nodes1.some(n => n.isFixed)) continue;
+
+      for (let j = i + 1; j < remainingWords.length; j++) {
+        const w2 = remainingWords[j];
+        const fixedLen2 = getFixedLength(w2);
+        if (fixedLen2 === 0 || fixedLen2 === w2.length) continue;
+
+        const cands2 = wordCharCandidates.get(w2.logiNumber)?.get(fixedLen2);
+        if (!cands2 || cands2.size !== 2) continue;
+
+        const nodes2 = Array.from(cands2).map(nid => nodeMap.get(nid)!);
+        if (nodes2.some(n => n.isFixed)) continue;
+
+        // 2つの集合が完全に一致しているかチェック
+        const nids1 = Array.from(cands1).sort();
+        const nids2 = Array.from(cands2).sort();
+        if (nids1[0] === nids2[0] && nids1[1] === nids2[1]) {
+          const nA = nodes1[0];
+          const nb = nodes1[1];
+          const char1 = w1.text[fixedLen1];
+          const char2 = w2.text[fixedLen2];
+
+          log(`    [Phase4予約] 単語 ${w1.text}(${w1.logiNumber}) & ${w2.text}(${w2.logiNumber}) -> マス ${getExcelCoords(nA)} (${char1}, ${char2}) & ${getExcelCoords(nb)} (${char1}, ${char2}) のペア予約`);
+
+          let localChanged = false;
+          if (!nA.reservedBy.has(w1.logiNumber)) { nA.reservedBy.add(w1.logiNumber); localChanged = true; }
+          if (!nA.reservedBy.has(w2.logiNumber)) { nA.reservedBy.add(w2.logiNumber); localChanged = true; }
+          if (!nb.reservedBy.has(w1.logiNumber)) { nb.reservedBy.add(w1.logiNumber); localChanged = true; }
+          if (!nb.reservedBy.has(w2.logiNumber)) { nb.reservedBy.add(w2.logiNumber); localChanged = true; }
+
+          if (!nA.reservedChars.has(char1)) { nA.reservedChars.add(char1); localChanged = true; }
+          if (!nA.reservedChars.has(char2)) { nA.reservedChars.add(char2); localChanged = true; }
+          if (!nb.reservedChars.has(char1)) { nb.reservedChars.add(char1); localChanged = true; }
+          if (!nb.reservedChars.has(char2)) { nb.reservedChars.add(char2); localChanged = true; }
+
+          if (localChanged) {
+            changed = true;
           }
         }
       }
@@ -1735,7 +1757,7 @@ export async function solveZigzagAsync(
       for (const nid of currNode.neighbors) {
         if (used.has(nid)) continue;
         const nb = nodeMap.get(nid)!;
-        if (canNodeAcceptChar(nb, targetChar)) {
+        if (canNodeAcceptChar(nb, targetChar, w.logiNumber)) {
           used.add(nid);
           dfs(nid, currentDist + 1);
           used.delete(nid);
@@ -1780,7 +1802,7 @@ export async function solveZigzagAsync(
           const neighborNode = nodeMap.get(neighborId)!;
           const targetChar = remainingText[charIdx];
 
-          if (!canNodeAcceptChar(neighborNode, targetChar)) continue;
+          if (!canNodeAcceptChar(neighborNode, targetChar, w.logiNumber)) continue;
 
           usedInWord.add(neighborId);
           currentPath.push(neighborId);
@@ -1893,18 +1915,29 @@ export async function solveZigzagAsync(
 
         if (gapSize > 0 && missingNumsCount > 0) {
           if (gapSize === missingNumsCount) {
+            let canPlaceAll = true;
             for (let k = 1; k <= gapSize; k++) {
-              const targetNode = candidateNodes[lastFoundIdx + k];
               const targetNum = lastFoundNum + k;
-              if (targetNode.logiNumber === null) {
-                log(`[番号位置推論] ${targetNum}番は ${getExcelCoords(targetNode)} に入ると推論しました（連続番号の隙間の数とマスの数が一致）`);
-                targetNode.logiNumber = targetNum;
-                const word = solverWords.find(sw => sw.logiNumber === targetNum);
-                if (word) {
-                  word.fixedNodeIDs[1] = targetNode.id;
-                  if (!targetNode.currentChar) {
-                    targetNode.currentChar = word.text[0];
-                    targetNode.isFixed = true;
+              if (posToNumber.includes(targetNum)) {
+                canPlaceAll = false;
+                break;
+              }
+            }
+            if (canPlaceAll) {
+              for (let k = 1; k <= gapSize; k++) {
+                const targetNode = candidateNodes[lastFoundIdx + k];
+                const targetNum = lastFoundNum + k;
+                if (targetNode.logiNumber === null) {
+                  log(`[番号位置推論] ${targetNum}番は ${getExcelCoords(targetNode)} に確定。理由：前方の確定番号 ${lastFoundNum}番（インデックス ${lastFoundIdx}）と後方の確定番号 ${currentNum}番（インデックス ${i}）の間の未確定マス数（${gapSize}）と、欠損番号数（${missingNumsCount}）が ${gapSize} で一致したため。`);
+                  targetNode.logiNumber = targetNum;
+                  posToNumber[lastFoundIdx + k] = targetNum; // Update posToNumber
+                  const word = solverWords.find(sw => sw.logiNumber === targetNum);
+                  if (word) {
+                    word.fixedNodeIDs[1] = targetNode.id;
+                    if (!targetNode.currentChar) {
+                      targetNode.currentChar = word.text[0];
+                      targetNode.isFixed = true;
+                    }
                   }
                 }
                 changed = true;
@@ -1929,10 +1962,10 @@ export async function solveZigzagAsync(
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const cell = cells[y][x];
-        const isScanTarget = isChoMode 
+        const isScanTarget = isChoMode
           ? ((cell.number !== null && !cell.isShaded) || cell.isShaded)
           : (cell.type === 'normal');
-        
+
         if (isScanTarget) {
           const node = nodeMap.get(`${x},${y}`);
           if (node) scanNodes.push(node);
@@ -1947,9 +1980,11 @@ export async function solveZigzagAsync(
     const anchors: Anchor[] = [];
     anchors.push({ scanIdx: -1, num: allWordNumbers[0] - 1 });
 
+    const placedNumbers = new Set<number>();
     for (let i = 0; i < scanNodes.length; i++) {
       if (scanNodes[i].logiNumber !== null) {
         anchors.push({ scanIdx: i, num: scanNodes[i].logiNumber! });
+        placedNumbers.add(scanNodes[i].logiNumber!);
       }
     }
     anchors.push({ scanIdx: scanNodes.length, num: allWordNumbers[allWordNumbers.length - 1] + 1 });
@@ -1962,7 +1997,7 @@ export async function solveZigzagAsync(
 
     for (let i = 0; i < anchors.length - 1; i++) {
       const a1 = anchors[i];
-      const a2 = anchors[i+1];
+      const a2 = anchors[i + 1];
 
       const M = a2.scanIdx - a1.scanIdx - 1;
       const N = a2.num - a1.num - 1;
@@ -1971,17 +2006,113 @@ export async function solveZigzagAsync(
 
       const S = M - N;
 
+      // 各欠損番号に対応する候補インデックスの Set を準備
+      const targetCandidates = new Map<number, Set<number>>();
       for (let k = 1; k <= N; k++) {
         const targetNum = a1.num + k;
+        if (placedNumbers.has(targetNum)) continue;
+
+        const cands = new Set<number>();
+        for (let offset = 0; offset <= S; offset++) {
+          const nodeIdx = a1.scanIdx + 1 + (k - 1) + offset;
+          if (nodeIdx >= 0 && nodeIdx < scanNodes.length) {
+            const node = scanNodes[nodeIdx];
+            if (node.logiNumber === null) {
+              cands.add(nodeIdx);
+            }
+          }
+        }
+        targetCandidates.set(targetNum, cands);
+      }
+
+      // 1. 各単語について、文字矛盾のない有効なパスが構築できるマスだけを残す
+      for (let k = 1; k <= N; k++) {
+        const targetNum = a1.num + k;
+        if (placedNumbers.has(targetNum)) continue;
+
+        const word = solverWords.find(sw => sw.logiNumber === targetNum);
+        if (!word) continue;
+
+        const cands = targetCandidates.get(targetNum);
+        if (!cands) continue;
+
+        for (const idx of Array.from(cands)) {
+          const node = scanNodes[idx];
+          // DFSによる有効パス検証
+          const hasValidPath = getAllValidPathsForBacktrack(word, [node]).length > 0;
+          if (!hasValidPath) {
+            cands.delete(idx);
+          }
+        }
+      }
+
+      // 2. 読書順制約（若い番号のインデックス < 遅い番号のインデックス）を伝播させて絞り込む
+      let candsChanged = true;
+      while (candsChanged) {
+        candsChanged = false;
+
+        // 前方伝播（若い順に最小境界を絞る）
+        for (let k = 2; k <= N; k++) {
+          const targetNum = a1.num + k;
+          if (placedNumbers.has(targetNum)) continue;
+
+          const prevNum = targetNum - 1;
+          const prevCands = targetCandidates.get(prevNum);
+          const currentCands = targetCandidates.get(targetNum);
+          if (!prevCands || !currentCands) continue;
+
+          let minPrev = Infinity;
+          for (const idx of prevCands) {
+            if (idx < minPrev) minPrev = idx;
+          }
+
+          if (minPrev !== Infinity) {
+            for (const idx of currentCands) {
+              if (idx <= minPrev) {
+                currentCands.delete(idx);
+                candsChanged = true;
+              }
+            }
+          }
+        }
+
+        // 後方伝播（遅い順に最大境界を絞る）
+        for (let k = N - 1; k >= 1; k--) {
+          const targetNum = a1.num + k;
+          if (placedNumbers.has(targetNum)) continue;
+
+          const nextNum = targetNum + 1;
+          const nextCands = targetCandidates.get(nextNum);
+          const currentCands = targetCandidates.get(targetNum);
+          if (!nextCands || !currentCands) continue;
+
+          let maxNext = -Infinity;
+          for (const idx of nextCands) {
+            if (idx > maxNext) maxNext = idx;
+          }
+
+          if (maxNext !== -Infinity) {
+            for (const idx of currentCands) {
+              if (idx >= maxNext) {
+                currentCands.delete(idx);
+                candsChanged = true;
+              }
+            }
+          }
+        }
+      }
+
+      // 最終結果を allowedStartNodesForWord に格納
+      for (let k = 1; k <= N; k++) {
+        const targetNum = a1.num + k;
+        if (placedNumbers.has(targetNum)) continue;
+
         if (allowedStartNodesForWord.has(targetNum)) {
           const allowedNodes = allowedStartNodesForWord.get(targetNum)!;
-          for (let offset = 0; offset <= S; offset++) {
-            const nodeIdx = a1.scanIdx + 1 + (k - 1) + offset;
-            if (nodeIdx >= 0 && nodeIdx < scanNodes.length) {
-              const node = scanNodes[nodeIdx];
-              if (node.logiNumber === null) {
-                allowedNodes.push(node);
-              }
+          const cands = targetCandidates.get(targetNum);
+          if (cands) {
+            for (const idx of Array.from(cands).sort((a, b) => a - b)) {
+              allowedNodes.push(scanNodes[idx]);
             }
           }
         }
@@ -1989,6 +2120,8 @@ export async function solveZigzagAsync(
     }
     return allowedStartNodesForWord;
   };
+
+
 
   /**
    * 超モード用：共有化シミュレーションによる網掛け開始位置の特定
@@ -2050,7 +2183,7 @@ export async function solveZigzagAsync(
             if (used.has(nid)) continue;
             const nb = nodeMap.get(nid)!;
 
-            if (!canNodeAcceptChar(nb, targetChar)) continue;
+            if (!canNodeAcceptChar(nb, targetChar, w.logiNumber)) continue;
 
             let isShared = false;
             if (nb.isFixed && nb.currentChar === targetChar) {
@@ -2098,7 +2231,7 @@ export async function solveZigzagAsync(
         if (hasValidPath) {
           validStartNodes.push({ startId: startNode.id, sharedPosMap });
         }
-        
+
         // UIスレッドを解放してキャンセルイベント等を受け取れるようにする
         incrementProgress();
         await new Promise(r => setTimeout(r, 0));
@@ -2123,9 +2256,9 @@ export async function solveZigzagAsync(
         if (uniqueSharedTargetId !== null) {
           const startNode = nodeMap.get(startId)!;
           const sharedNode = nodeMap.get(uniqueSharedTargetId)!;
-          
-          log(`[共有化開始位置推論] 単語 [${w.logiNumber}] の開始位置を ${getExcelCoords(startNode)} と特定 (共有文字 '${w.text[uniqueSharedCharIdx]}' @ ${getExcelCoords(sharedNode)})`);
-          
+
+          log(`[共有化開始位置推論] 単語 [${w.logiNumber}] の開始位置を ${getExcelCoords(startNode)} に確定。理由：可能パス候補 ${allowedCandidates.length}個のうち、他の確定済み単語と文字が共有可能なパスを作れる開始マスが ${getExcelCoords(startNode)} の1つだけであり、共有文字 '${w.text[uniqueSharedCharIdx]}' が入るマスも ${getExcelCoords(sharedNode)} の1箇所に限定されたため。`);
+
           startNode.logiNumber = w.logiNumber;
           w.fixedNodeIDs[1] = startId;
           if (!startNode.currentChar) {
@@ -2135,7 +2268,7 @@ export async function solveZigzagAsync(
           if (!sharedNode.isFixed) {
             fixNode(sharedNode, w.text[uniqueSharedCharIdx]);
           }
-          
+
           changed = true;
           break; // 他の単語に影響を与えるため一度ブレイクして再計算
         }
@@ -2204,15 +2337,15 @@ export async function solveZigzagAsync(
       if (startCands && startCands.size === 1) {
         const startId = Array.from(startCands)[0];
         const startNode = nodeMap.get(startId)!;
-        
+
         log(`[変則開始位置特定] 単語 [${w.logiNumber}] "${w.text}" の開始位置を唯一の候補 ${getExcelCoords(startNode)} と特定しました`);
-        
+
         startNode.logiNumber = w.logiNumber;
         w.fixedNodeIDs[1] = startId;
         if (!startNode.currentChar && w.text !== "") {
           fixNode(startNode, w.text[0]);
         }
-        
+
         await reportStep();
         changed = true;
         break;
@@ -2324,7 +2457,8 @@ export async function solveZigzagAsync(
     };
   };
 
-  const restoreSnapshot = (snap: Snapshot) => {
+  const restoreSnapshot = (snap: Snapshot, reason?: string) => {
+    log(`[Backtrack] 盤面状態をSnapshotから復元します（ロールバック）${reason ? ' : ' + reason : ''}`);
     for (const sn of snap.nodes) {
       const node = nodeMap.get(sn.id)!;
       node.logiNumber = sn.logiNumber;
@@ -2341,7 +2475,7 @@ export async function solveZigzagAsync(
     }
   };
 
-  const getAllValidPathsForBacktrack = (w: SolverWord, startNodesOverride?: SolverNode[]): {nid: string, char: string}[][] => {
+  const getAllValidPathsForBacktrack = (w: SolverWord, startNodesOverride?: SolverNode[]): { nid: string, char: string }[][] => {
     const fixedLen = getFixedLength(w);
     const paths: { nid: string, char: string }[][] = [];
 
@@ -2373,7 +2507,7 @@ export async function solveZigzagAsync(
           if (used.has(nid)) continue;
           if (nextFixedId && nid !== nextFixedId) continue;
           const nb = nodeMap.get(nid)!;
-          if (canNodeAcceptChar(nb, targetChar)) {
+          if (canNodeAcceptChar(nb, targetChar, w.logiNumber)) {
             used.add(nid);
             currentPath.push({ nid, char: targetChar });
             dfs(nid, charIdx + 1);
@@ -2387,10 +2521,10 @@ export async function solveZigzagAsync(
       if (!startNodesOverride) return [];
       for (const startNode of startNodesOverride) {
         if (startNode.isFixed && startNode.currentChar !== w.text[0]) continue;
-        
+
         const used = new Set<string>();
         const currentPath: { nid: string, char: string }[] = [];
-        
+
         let dfsCalls = 0;
         let overflow = false;
 
@@ -2409,12 +2543,12 @@ export async function solveZigzagAsync(
           const currNode = nodeMap.get(currId)!;
           const targetChar = w.text[charIdx];
           const nextFixedId = w.fixedNodeIDs[charIdx + 1];
-          
+
           for (const nid of currNode.neighbors) {
             if (used.has(nid)) continue;
             if (nextFixedId && nid !== nextFixedId) continue;
             const nb = nodeMap.get(nid)!;
-            if (canNodeAcceptChar(nb, targetChar)) {
+            if (canNodeAcceptChar(nb, targetChar, w.logiNumber)) {
               used.add(nid);
               currentPath.push({ nid, char: targetChar });
               dfs(nid, charIdx + 1);
@@ -2423,7 +2557,7 @@ export async function solveZigzagAsync(
             }
           }
         };
-        
+
         used.add(startNode.id);
         currentPath.push({ nid: startNode.id, char: w.text[0] });
         dfs(startNode.id, 1);
@@ -2432,7 +2566,7 @@ export async function solveZigzagAsync(
     return paths;
   };
 
-  const calculateSharingScore = (wNum: number, paths: {nid: string, char: string}[][]): number => {
+  const calculateSharingScore = (wNum: number, paths: { nid: string, char: string }[][]): number => {
     let score = paths.length * 1000;
     let bestPathSharingBonus = 0;
     for (const path of paths) {
@@ -2455,9 +2589,11 @@ export async function solveZigzagAsync(
     assignments: Map<number, { nid: string, char: string }[]>; // wordLogiNumber -> path
   }
 
+  let lastGroupSolveFailureInfo = { wNum: -1, reason: "", gridDump: "" };
+
   const findGroupPatterns = async (
     groupWordNums: number[],
-    wordPaths: Map<number, {nid: string, char: string}[][]>,
+    wordPaths: Map<number, { nid: string, char: string }[][]>,
     starContext?: {
       unassignedStarLogiNums: Set<number>;
       unusedList2Words: string[];
@@ -2466,6 +2602,7 @@ export async function solveZigzagAsync(
   ): Promise<GroupPattern[]> => {
     const patterns: GroupPattern[] = [];
     const nWords = groupWordNums.length;
+    let deepestWIdx = -1;
 
     let iterations = 0;
     const maxLocalIterations = 1000000;
@@ -2500,13 +2637,42 @@ export async function solveZigzagAsync(
 
       const wNum = groupWordNums[wIdx];
       const paths = wordPaths.get(wNum)!;
+      const word = solverWords.find(sw => sw.logiNumber === wNum)!;
+      const isStar = !!(starContext && starContext.unassignedStarLogiNums.has(wNum));
+      const fixedLen = isStar ? 0 : getFixedLength(word);
+
+      const currentAllowedStarts = getAllowedStartNodes();
+      const allowedNodes = currentAllowedStarts.get(wNum) || [];
+      const allowedNodeIds = new Set(allowedNodes.map(n => n.id));
+
+      let pathValidCount = 0;
 
       for (let pIdx = 0; pIdx < paths.length; pIdx++) {
         await checkYield();
         const path = paths[pIdx];
 
+        // 1. 最新の開始候補に入っていない場合はスキップ (読書順の動的チェック)
+        if (fixedLen === 0) {
+          if (!allowedNodeIds.has(path[0].nid)) {
+            continue;
+          }
+        }
+
+        // 2. 安全策：同じ単語番号がすでに盤面の他のノードに設定されていないかチェック
+        let isAlreadyPlaced = false;
+        for (const otherNode of nodeMap.values()) {
+          if (otherNode.logiNumber === wNum) {
+            if (word.fixedNodeIDs[1] !== otherNode.id) {
+              isAlreadyPlaced = true;
+              break;
+            }
+          }
+        }
+        if (isAlreadyPlaced) {
+          continue;
+        }
+
         // 重複単語使用チェック
-        const isStar = starContext && starContext.unassignedStarLogiNums.has(wNum);
         if (isStar) {
           const wordText = path.map(step => step.char).join("");
           let isDuplicate = false;
@@ -2525,19 +2691,60 @@ export async function solveZigzagAsync(
 
         let canPlace = true;
 
+        // 3. 読書順矛盾チェック (仮置き済み単語との順序チェック)
+        const currentStartIdx = nodeIdxMap.get(path[0].nid);
+        if (currentStartIdx !== undefined) {
+          for (const otherW of solverWords) {
+            if (otherW.isUsed && otherW.logiNumber !== wNum) {
+              const otherStartId = otherW.fixedNodeIDs[1];
+              if (otherStartId) {
+                const otherStartIdx = nodeIdxMap.get(otherStartId);
+                if (otherStartIdx !== undefined) {
+                  if (otherW.logiNumber < wNum && otherStartIdx > currentStartIdx) {
+                    canPlace = false;
+                    break;
+                  }
+                  if (otherW.logiNumber > wNum && otherStartIdx < currentStartIdx) {
+                    canPlace = false;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+        if (!canPlace) continue;
         for (const step of path) {
           const node = nodeMap.get(step.nid)!;
           if (node.isFixed && node.currentChar !== step.char) {
             canPlace = false;
             break;
           }
+
+          // 確定済みの他の単語が占有している通常マスとの衝突チェック
+          let isOccupiedByOther = false;
+          for (const otherW of solverWords) {
+            if (otherW.isUsed && otherW.logiNumber !== wNum) {
+              if (otherW.fixedNodeIDs.includes(node.id)) {
+                const isSharedCell = (isIrregularMode && sharedCells[node.id]) ||
+                  (puzzle.isWListStar && node.logiNumber !== null && puzzle.wordStarList?.[node.logiNumber]);
+                if (!isSharedCell) {
+                  isOccupiedByOther = true;
+                  break;
+                }
+              }
+            }
+          }
+          if (isOccupiedByOther) {
+            canPlace = false;
+            break;
+          }
         }
 
         if (!canPlace) continue;
+        pathValidCount++;
 
         const snap = createSnapshot();
-        const word = solverWords.find(sw => sw.logiNumber === wNum)!;
-        const fixedLen = isStar ? 0 : getFixedLength(word);
 
         for (let i = 0; i < path.length; i++) {
           const step = path[i];
@@ -2554,13 +2761,58 @@ export async function solveZigzagAsync(
         await backtrackGroup(wIdx + 1, currentAssignments);
 
         currentAssignments.delete(wNum);
-        restoreSnapshot(snap);
+        restoreSnapshot(snap, `単語[${wNum}] の探索から戻るため復元`);
+      }
+
+      if (wIdx >= deepestWIdx) {
+        deepestWIdx = wIdx;
+        let reasonDetail = "";
+        if (paths.length === 0) {
+          reasonDetail = "可能経路パスが0通り";
+        } else if (allowedNodeIds.size === 0) {
+          reasonDetail = "開始候補マス（allowedStarts）が0個";
+        } else if (pathValidCount === 0) {
+          reasonDetail = `経路はありますが、すべて文字不一致または順序矛盾（仮置き文字や確定文字との衝突）により配置できませんでした`;
+        } else {
+          reasonDetail = `有効な仮置き先候補をすべて試行しましたが、その先（深度 ${wIdx + 1} 以降）の単語が配置できず矛盾しました`;
+        }
+
+        let dump = "";
+        const grid = getGridChars();
+        for (let y = 0; y < height; y++) {
+          let rowStr = "";
+          for (let x = 0; x < width; x++) {
+            const cell = cells[y][x];
+            if (cell.type === 'wall') {
+              rowStr += "■";
+            } else {
+              const char = grid[y][x] || "□";
+              rowStr += char;
+            }
+          }
+          dump += `[GroupSolve]     ${rowStr}\n`;
+        }
+
+        lastGroupSolveFailureInfo = {
+          wNum,
+          reason: reasonDetail,
+          gridDump: dump
+        };
       }
     };
 
     const initialSnap = createSnapshot();
-    await backtrackGroup(0, new Map());
-    restoreSnapshot(initialSnap);
+    try {
+      await backtrackGroup(0, new Map());
+      restoreSnapshot(initialSnap, `グループ全探索終了による初期状態への復元`);
+    } catch (e: any) {
+      if (e.message === "cancelled") {
+        log(`[GroupSolve] 中止されたため、現在の探索状態を保持し、ロールバックしません。`);
+      } else {
+        restoreSnapshot(initialSnap, `エラー中断による初期状態への復元 : ${e.message}`);
+      }
+      throw e;
+    }
     return patterns;
   };
 
@@ -2571,6 +2823,7 @@ export async function solveZigzagAsync(
     }
   ): Promise<boolean> => {
     let groupPatternsList: GroupPattern[][] = [];
+    lastGroupSolveFailureInfo = { wNum: -1, reason: "", gridDump: "" };
 
     while (true) {
       const remainingWords = solverWords.filter(w => !w.isUsed);
@@ -2583,368 +2836,393 @@ export async function solveZigzagAsync(
       }
 
       log(`[GroupSolve] グループ総当たりを開始します... (対象単語数: ${remainingWords.length})`);
-    
-    const allowedStarts = getAllowedStartNodes();
-    const wordPaths = new Map<number, {nid: string, char: string}[][]>();
-    for (const w of remainingWords) {
-      if (checkCancelled && checkCancelled()) {
-        throw new Error("cancelled");
-      }
-      incrementProgress();
-      await new Promise(r => setTimeout(r, 0));
-      
-      const isStar = starContext && starContext.unassignedStarLogiNums.has(w.logiNumber);
-      let paths: {nid: string, char: string}[][] = [];
-      if (isStar) {
-        const origText = w.text;
-        const origLength = w.length;
-        const origFixedNodeIDs = [...w.fixedNodeIDs];
-        
-        for (const wordText of starContext.unusedList2Words) {
-          w.text = wordText;
-          w.length = wordText.length;
-          w.fixedNodeIDs = new Array(wordText.length + 1).fill(null);
-          
-          let subPaths: {nid: string, char: string}[][] = [];
-          const startNodeId = origFixedNodeIDs[1];
-          const overrideNodes: SolverNode[] = [];
-          if (startNodeId) {
-            const sn = nodeMap.get(startNodeId);
-            if (sn) {
-              overrideNodes.push(sn);
-            }
-          }
-          subPaths = getAllValidPathsForBacktrack(w, overrideNodes);
-          paths.push(...subPaths);
+
+      const allowedStarts = getAllowedStartNodes();
+      const wordPaths = new Map<number, { nid: string, char: string }[][]>();
+      for (const w of remainingWords) {
+        if (checkCancelled && checkCancelled()) {
+          throw new Error("cancelled");
         }
-        
-        // 復元
-        w.text = origText;
-        w.length = origLength;
-        w.fixedNodeIDs = origFixedNodeIDs;
-      } else {
-        const fixedLen = getFixedLength(w);
-        if (fixedLen === 0) {
-          const overrideNodes = allowedStarts.get(w.logiNumber) || [];
-          paths = getAllValidPathsForBacktrack(w, overrideNodes);
+        incrementProgress();
+        await new Promise(r => setTimeout(r, 0));
+
+        const isStar = starContext && starContext.unassignedStarLogiNums.has(w.logiNumber);
+        let paths: { nid: string, char: string }[][] = [];
+        if (isStar) {
+          const origText = w.text;
+          const origLength = w.length;
+          const origFixedNodeIDs = [...w.fixedNodeIDs];
+
+          for (const wordText of starContext.unusedList2Words) {
+            w.text = wordText;
+            w.length = wordText.length;
+            w.fixedNodeIDs = new Array(wordText.length + 1).fill(null);
+
+            let subPaths: { nid: string, char: string }[][] = [];
+            const startNodeId = origFixedNodeIDs[1];
+            const overrideNodes: SolverNode[] = [];
+            if (startNodeId) {
+              const sn = nodeMap.get(startNodeId);
+              if (sn) {
+                overrideNodes.push(sn);
+              }
+            }
+            subPaths = getAllValidPathsForBacktrack(w, overrideNodes);
+            paths.push(...subPaths);
+          }
+
+          // 復元
+          w.text = origText;
+          w.length = origLength;
+          w.fixedNodeIDs = origFixedNodeIDs;
         } else {
-          paths = getAllValidPathsForBacktrack(w);
-        }
-      }
-
-      if (paths.length === 0) {
-        log(`[GroupSolve] 単語 [${w.logiNumber}] の可能経路がありません。矛盾です。`);
-        return false;
-      }
-      wordPaths.set(w.logiNumber, paths);
-    }
-
-    // グラフ接続関係の構築：同じマスかつ同じ文字（共有文字）で繋ぐ
-    const adj: Map<number, Set<number>> = new Map();
-    for (const w of remainingWords) {
-      adj.set(w.logiNumber, new Set());
-    }
-
-    const nodeCharToWords: Map<string, number[]> = new Map();
-    for (const w of remainingWords) {
-      const paths = wordPaths.get(w.logiNumber)!;
-      const keyUsed = new Set<string>();
-      
-      // 候補パスが通るマスと文字を追加
-      for (const path of paths) {
-        await checkYield();
-        for (const step of path) {
-          const key = `${step.nid}:${step.char}`;
-          keyUsed.add(key);
-        }
-      }
-
-      // 確定済みの接頭辞マスと文字も追加（確定文字との共有も考慮するため）
-      const fixedLen = getFixedLength(w);
-      for (let i = 1; i <= fixedLen; i++) {
-        const nid = w.fixedNodeIDs[i];
-        if (nid) {
-          const char = w.text[i - 1];
-          const key = `${nid}:${char}`;
-          keyUsed.add(key);
-        }
-      }
-
-      for (const key of keyUsed) {
-        if (!nodeCharToWords.has(key)) {
-          nodeCharToWords.set(key, []);
-        }
-        nodeCharToWords.get(key)!.push(w.logiNumber);
-      }
-    }
-
-    for (const words of nodeCharToWords.values()) {
-      for (let i = 0; i < words.length; i++) {
-        for (let j = i + 1; j < words.length; j++) {
-          adj.get(words[i])!.add(words[j]);
-          adj.get(words[j])!.add(words[i]);
-        }
-      }
-    }
-
-    const visitedWords = new Set<number>();
-    const groups: number[][] = [];
-    for (const w of remainingWords) {
-      if (visitedWords.has(w.logiNumber)) continue;
-      const group: number[] = [];
-      const queue: number[] = [w.logiNumber];
-      visitedWords.add(w.logiNumber);
-      while (queue.length > 0) {
-        const curr = queue.shift()!;
-        group.push(curr);
-        for (const neighbor of adj.get(curr)!) {
-          if (!visitedWords.has(neighbor)) {
-            visitedWords.add(neighbor);
-            queue.push(neighbor);
-          }
-        }
-      }
-      groups.push(group);
-    }
-
-    log(`[GroupSolve] グループ抽出完了。グループ数: ${groups.length}`);
-    groups.forEach((g, idx) => {
-      log(`[GroupSolve] グループ #${idx + 1}: 単語リスト [${g.join(", ")}]`);
-    });
-
-    groupPatternsList = [];
-
-    const resolveGroupContradiction = async (group: number[]): Promise<GroupPattern[]> => {
-      const N = group.length;
-      if (N <= 1 || N > 12) return []; // 単語数12以下のグループのみ分割救済を試みる
-
-      log(`[GroupSolve] グループの矛盾を検知しました。グループ分割による救済探索を開始します... (単語数: ${N})`);
-
-      const subsetMemo = new Map<string, GroupPattern[]>();
-
-      const getPats = async (subset: number[]): Promise<GroupPattern[]> => {
-        const key = subset.slice().sort((a, b) => a - b).join(",");
-        if (subsetMemo.has(key)) return subsetMemo.get(key)!;
-        
-        const pats = await findGroupPatterns(subset, wordPaths, starContext, checkCancelled);
-        subsetMemo.set(key, pats);
-        return pats;
-      };
-
-      for (let K = 2; K <= N; K++) {
-        log(`[GroupSolve]  分割数 ${K} で検証中...`);
-        let anyValidPartition = false;
-        const allMergedPatterns: GroupPattern[] = [];
-        const uniqueKeys = new Set<string>();
-        
-        for (const partition of getPartitions(group, K)) {
-          await checkYield();
-          let partitionValid = true;
-          const partitionPatsList: GroupPattern[][] = [];
-
-          for (const subset of partition) {
-            const pats = await getPats(subset);
-            if (pats.length === 0) {
-              partitionValid = false;
-              break;
-            }
-            partitionPatsList.push(pats);
-          }
-
-          if (partitionValid) {
-            const combineSubsets = (idx: number, currentAssignments: Map<number, {nid: string, char: string}[]>, usedNidChars: Map<string, string>) => {
-              if (idx === K) {
-                const entries = Array.from(currentAssignments.entries()).sort((a, b) => a[0] - b[0]);
-                let key = "";
-                for (const [wNum, path] of entries) {
-                  key += `${wNum}:`;
-                  for (const step of path) key += `${step.nid},`;
-                  key += "|";
-                }
-                if (!uniqueKeys.has(key)) {
-                  uniqueKeys.add(key);
-                  allMergedPatterns.push({ assignments: new Map(currentAssignments) });
-                  anyValidPartition = true;
-                }
-                return;
-              }
-
-              const subsetPats = partitionPatsList[idx];
-              for (const pat of subsetPats) {
-                let overlap = false;
-                const newlyUsed = new Map<string, string>();
-                for (const path of pat.assignments.values()) {
-                  for (const step of path) {
-                    if (usedNidChars.has(step.nid)) {
-                      if (usedNidChars.get(step.nid) !== step.char) {
-                        overlap = true;
-                        break;
-                      }
-                    }
-                    newlyUsed.set(step.nid, step.char);
-                  }
-                  if (overlap) break;
-                }
-                
-                if (!overlap) {
-                  for (const [nid, char] of newlyUsed.entries()) usedNidChars.set(nid, char);
-                  for (const [wNum, path] of pat.assignments.entries()) {
-                    currentAssignments.set(wNum, path);
-                  }
-                  
-                  combineSubsets(idx + 1, currentAssignments, usedNidChars);
-                  
-                  for (const nid of newlyUsed.keys()) usedNidChars.delete(nid);
-                  for (const wNum of pat.assignments.keys()) {
-                    currentAssignments.delete(wNum);
-                  }
-                }
-              }
-            };
-            
-            combineSubsets(0, new Map(), new Map());
+          const fixedLen = getFixedLength(w);
+          if (fixedLen === 0) {
+            const overrideNodes = allowedStarts.get(w.logiNumber) || [];
+            paths = getAllValidPathsForBacktrack(w, overrideNodes);
+          } else {
+            paths = getAllValidPathsForBacktrack(w);
           }
         }
 
-        if (anyValidPartition && allMergedPatterns.length > 0) {
-          log(`[GroupSolve]  分割数 ${K} で有効な配置パターンを発見しました！（救済成功、パターン数: ${allMergedPatterns.length}）`);
-          return allMergedPatterns;
-        }
-      }
-
-      return [];
-    };
-
-    for (let gIdx = 0; gIdx < groups.length; gIdx++) {
-      const group = groups[gIdx];
-      
-      if (checkCancelled && checkCancelled()) {
-        throw new Error("cancelled");
-      }
-
-      log(`[GroupSolve] グループ #${gIdx + 1} のローカル総当たり中...`);
-      group.forEach(wNum => {
-        const paths = wordPaths.get(wNum) || [];
-        log(`[GroupSolve]   単語 [${wNum}] の候補パス数: ${paths.length}`);
-      });
-
-      let pats = await findGroupPatterns(group, wordPaths, starContext, checkCancelled);
-      if (pats.length === 0) {
-        pats = await resolveGroupContradiction(group);
-        if (pats.length === 0) {
-          log(`[GroupSolve] グループ #${gIdx + 1} に有効な配置パターンがありません。分割救済でも解決できませんでした。矛盾です。`);
+        if (paths.length === 0) {
+          log(`[GroupSolve] 単語 [${w.logiNumber}] の可能経路がありません。矛盾です。`);
           return false;
         }
+        wordPaths.set(w.logiNumber, paths);
       }
-      log(`[GroupSolve] グループ #${gIdx + 1} パターン数: ${pats.length}`);
-      groupPatternsList.push(pats);
-    }
 
-    // --- パターン数1 of グループ確定処理 ---
-    const singlePatternGroups: { gIdx: number, pat: GroupPattern }[] = [];
-    for (let i = 0; i < groupPatternsList.length; i++) {
-      if (groupPatternsList[i].length === 1) {
-        singlePatternGroups.push({ gIdx: i, pat: groupPatternsList[i][0] });
+      // グラフ接続関係の構築：同じマスかつ同じ文字（共有文字）で繋ぐ
+      const adj: Map<number, Set<number>> = new Map();
+      for (const w of remainingWords) {
+        adj.set(w.logiNumber, new Set());
       }
-    }
 
-    if (singlePatternGroups.length > 0) {
-      const groupsToApply: { pat: GroupPattern, starAss: Map<number, string> }[] = [];
+      const nodeCharToWords: Map<string, number[]> = new Map();
+      for (const w of remainingWords) {
+        const paths = wordPaths.get(w.logiNumber)!;
+        const keyUsed = new Set<string>();
 
-      for (const { pat } of singlePatternGroups) {
-        let groupValid = true;
-        const starAss = new Map<number, string>();
-
-        for (const [wNum, path] of pat.assignments.entries()) {
-          const isStar = starContext && starContext.unassignedStarLogiNums.has(wNum);
-          if (isStar) {
-            const wordText = path.map(step => step.char).join("");
-            starAss.set(wNum, wordText);
+        // 候補パスが通るマスと文字を追加
+        for (const path of paths) {
+          await checkYield();
+          for (const step of path) {
+            const key = `${step.nid}:${step.char}`;
+            keyUsed.add(key);
           }
         }
 
-        if (groupValid) {
-          groupsToApply.push({ pat, starAss });
+        // 確定済みの接頭辞マスと文字も追加（確定文字との共有も考慮するため）
+        const fixedLen = getFixedLength(w);
+        for (let i = 1; i <= fixedLen; i++) {
+          const nid = w.fixedNodeIDs[i];
+          if (nid) {
+            const char = w.text[i - 1];
+            const key = `${nid}:${char}`;
+            keyUsed.add(key);
+          }
+        }
+
+        for (const key of keyUsed) {
+          if (!nodeCharToWords.has(key)) {
+            nodeCharToWords.set(key, []);
+          }
+          nodeCharToWords.get(key)!.push(w.logiNumber);
         }
       }
 
-      if (groupsToApply.length > 0) {
-        let hasConflict = false;
-        const tempUsedCells = new Map<string, string>();
-        
-        for (const { pat } of groupsToApply) {
-          for (const path of pat.assignments.values()) {
-            for (let i = 0; i < path.length; i++) {
-              const step = path[i];
-              const char = step.char;
-              if (tempUsedCells.has(step.nid) && tempUsedCells.get(step.nid) !== char) {
-                hasConflict = true;
+      for (const words of nodeCharToWords.values()) {
+        for (let i = 0; i < words.length; i++) {
+          for (let j = i + 1; j < words.length; j++) {
+            adj.get(words[i])!.add(words[j]);
+            adj.get(words[j])!.add(words[i]);
+          }
+        }
+      }
+
+      const visitedWords = new Set<number>();
+      const groups: number[][] = [];
+      for (const w of remainingWords) {
+        if (visitedWords.has(w.logiNumber)) continue;
+        const group: number[] = [];
+        const queue: number[] = [w.logiNumber];
+        visitedWords.add(w.logiNumber);
+        while (queue.length > 0) {
+          const curr = queue.shift()!;
+          group.push(curr);
+          for (const neighbor of adj.get(curr)!) {
+            if (!visitedWords.has(neighbor)) {
+              visitedWords.add(neighbor);
+              queue.push(neighbor);
+            }
+          }
+        }
+        groups.push(group);
+      }
+
+      log(`[GroupSolve] グループ抽出完了。グループ数: ${groups.length}`);
+      groups.forEach((g, idx) => {
+        log(`[GroupSolve] グループ #${idx + 1}: 単語リスト [${g.join(", ")}]`);
+        const candLogs = g.map(wNum => {
+          const allowedNodes = allowedStarts.get(wNum) || [];
+          const coords = allowedNodes.map(n => getExcelCoords(n)).join(", ");
+          return `${wNum}=[${coords}]`;
+        });
+        log(`[GroupSolve]   開始位置候補: ${candLogs.join(" | ")}`);
+      });
+
+      const shadedCoords = Array.from(nodeMap.values())
+        .filter(n => cells[n.y][n.x].isShaded)
+        .map(n => {
+          const numStr = n.logiNumber !== null
+            ? String(n.logiNumber)
+            : "未特定";
+          return `${numStr}=${getExcelCoords(n)}`;
+        });
+      log(`[GroupSolve] 網掛け数字マスの位置: ${shadedCoords.join(", ")}`);
+
+      groupPatternsList = [];
+
+      const resolveGroupContradiction = async (group: number[]): Promise<GroupPattern[]> => {
+        const N = group.length;
+        if (N <= 1 || N > 12) return []; // 単語数12以下のグループのみ分割救済を試みる
+
+        log(`[GroupSolve] グループの矛盾を検知しました。グループ分割による救済探索を開始します... (単語数: ${N})`);
+
+        const subsetMemo = new Map<string, GroupPattern[]>();
+
+        const getPats = async (subset: number[]): Promise<GroupPattern[]> => {
+          const key = subset.slice().sort((a, b) => a - b).join(",");
+          if (subsetMemo.has(key)) return subsetMemo.get(key)!;
+
+          const pats = await findGroupPatterns(subset, wordPaths, starContext, checkCancelled);
+          subsetMemo.set(key, pats);
+          return pats;
+        };
+
+        for (let K = 2; K <= N; K++) {
+          log(`[GroupSolve]  分割数 ${K} で検証中...`);
+          let anyValidPartition = false;
+          const allMergedPatterns: GroupPattern[] = [];
+          const uniqueKeys = new Set<string>();
+
+          for (const partition of getPartitions(group, K)) {
+            await checkYield();
+            let partitionValid = true;
+            const partitionPatsList: GroupPattern[][] = [];
+
+            for (const subset of partition) {
+              const pats = await getPats(subset);
+              if (pats.length === 0) {
+                partitionValid = false;
                 break;
               }
-              const node = nodeMap.get(step.nid)!;
-              if (node.isFixed && node.currentChar !== char) {
-                hasConflict = true;
-                break;
+              partitionPatsList.push(pats);
+            }
+
+            if (partitionValid) {
+              const combineSubsets = (idx: number, currentAssignments: Map<number, { nid: string, char: string }[]>, usedNidChars: Map<string, string>) => {
+                if (idx === K) {
+                  const entries = Array.from(currentAssignments.entries()).sort((a, b) => a[0] - b[0]);
+                  let key = "";
+                  for (const [wNum, path] of entries) {
+                    key += `${wNum}:`;
+                    for (const step of path) key += `${step.nid},`;
+                    key += "|";
+                  }
+                  if (!uniqueKeys.has(key)) {
+                    uniqueKeys.add(key);
+                    allMergedPatterns.push({ assignments: new Map(currentAssignments) });
+                    anyValidPartition = true;
+                  }
+                  return;
+                }
+
+                const subsetPats = partitionPatsList[idx];
+                for (const pat of subsetPats) {
+                  let overlap = false;
+                  const newlyUsed = new Map<string, string>();
+                  for (const path of pat.assignments.values()) {
+                    for (const step of path) {
+                      if (usedNidChars.has(step.nid)) {
+                        if (usedNidChars.get(step.nid) !== step.char) {
+                          overlap = true;
+                          break;
+                        }
+                      }
+                      newlyUsed.set(step.nid, step.char);
+                    }
+                    if (overlap) break;
+                  }
+
+                  if (!overlap) {
+                    for (const [nid, char] of newlyUsed.entries()) usedNidChars.set(nid, char);
+                    for (const [wNum, path] of pat.assignments.entries()) {
+                      currentAssignments.set(wNum, path);
+                    }
+
+                    combineSubsets(idx + 1, currentAssignments, usedNidChars);
+
+                    for (const nid of newlyUsed.keys()) usedNidChars.delete(nid);
+                    for (const wNum of pat.assignments.keys()) {
+                      currentAssignments.delete(wNum);
+                    }
+                  }
+                }
+              };
+
+              combineSubsets(0, new Map(), new Map());
+            }
+          }
+
+          if (anyValidPartition && allMergedPatterns.length > 0) {
+            log(`[GroupSolve]  分割数 ${K} で有効な配置パターンを発見しました！（救済成功、パターン数: ${allMergedPatterns.length}）`);
+            return allMergedPatterns;
+          }
+        }
+
+        return [];
+      };
+
+      for (let gIdx = 0; gIdx < groups.length; gIdx++) {
+        const group = groups[gIdx];
+
+        if (checkCancelled && checkCancelled()) {
+          throw new Error("cancelled");
+        }
+
+        log(`[GroupSolve] グループ #${gIdx + 1} のローカル総当たり中...`);
+        group.forEach(wNum => {
+          const paths = wordPaths.get(wNum) || [];
+          log(`[GroupSolve]   単語 [${wNum}] の候補パス数: ${paths.length}`);
+        });
+
+        let pats = await findGroupPatterns(group, wordPaths, starContext, checkCancelled);
+        if (pats.length === 0) {
+          log(`[GroupSolve] グループ #${gIdx + 1} のローカル総当たりで有効な配置パターンが見つかりませんでした。`);
+          if (lastGroupSolveFailureInfo.wNum !== -1) {
+            const failedWord = solverWords.find(sw => sw.logiNumber === lastGroupSolveFailureInfo.wNum);
+            log(`[GroupSolve]   最後に行き詰まった箇所: 単語 [${lastGroupSolveFailureInfo.wNum}] "${failedWord ? failedWord.text : ''}"`);
+            log(`[GroupSolve]   行き詰まり理由: ${lastGroupSolveFailureInfo.reason}`);
+            if (lastGroupSolveFailureInfo.gridDump) {
+              log(`[GroupSolve]   行き詰まり時の盤面状態:\n${lastGroupSolveFailureInfo.gridDump.trimEnd()}`);
+            }
+          }
+          pats = await resolveGroupContradiction(group);
+          if (pats.length === 0) {
+            log(`[GroupSolve] グループ #${gIdx + 1} に有効な配置パターンがありません。分割救済でも解決できませんでした。矛盾です。`);
+            return false;
+          }
+        }
+        log(`[GroupSolve] グループ #${gIdx + 1} パターン数: ${pats.length}`);
+        groupPatternsList.push(pats);
+      }
+
+      // --- パターン数1 of グループ確定処理 ---
+      const singlePatternGroups: { gIdx: number, pat: GroupPattern }[] = [];
+      for (let i = 0; i < groupPatternsList.length; i++) {
+        if (groupPatternsList[i].length === 1) {
+          singlePatternGroups.push({ gIdx: i, pat: groupPatternsList[i][0] });
+        }
+      }
+
+      if (singlePatternGroups.length > 0) {
+        const groupsToApply: { pat: GroupPattern, starAss: Map<number, string> }[] = [];
+
+        for (const { pat } of singlePatternGroups) {
+          let groupValid = true;
+          const starAss = new Map<number, string>();
+
+          for (const [wNum, path] of pat.assignments.entries()) {
+            const isStar = starContext && starContext.unassignedStarLogiNums.has(wNum);
+            if (isStar) {
+              const wordText = path.map(step => step.char).join("");
+              starAss.set(wNum, wordText);
+            }
+          }
+
+          if (groupValid) {
+            groupsToApply.push({ pat, starAss });
+          }
+        }
+
+        if (groupsToApply.length > 0) {
+          let hasConflict = false;
+          const tempUsedCells = new Map<string, string>();
+
+          for (const { pat } of groupsToApply) {
+            for (const path of pat.assignments.values()) {
+              for (let i = 0; i < path.length; i++) {
+                const step = path[i];
+                const char = step.char;
+                if (tempUsedCells.has(step.nid) && tempUsedCells.get(step.nid) !== char) {
+                  hasConflict = true;
+                  break;
+                }
+                const node = nodeMap.get(step.nid)!;
+                if (node.isFixed && node.currentChar !== char) {
+                  hasConflict = true;
+                  break;
+                }
+                tempUsedCells.set(step.nid, char);
               }
-              tempUsedCells.set(step.nid, char);
+              if (hasConflict) break;
             }
             if (hasConflict) break;
           }
-          if (hasConflict) break;
-        }
 
-        if (hasConflict) {
-          log(`[GroupSolve] パターン数1のグループ同士、または既定 of 文字と衝突が発生しました。`);
-          return false; // 矛盾
-        }
+          if (hasConflict) {
+            log(`[GroupSolve] パターン数1のグループ同士、または既定 of 文字と衝突が発生しました。`);
+            return false; // 矛盾
+          }
 
-        let appliedAny = false;
-        for (const { pat, starAss } of groupsToApply) {
-          for (const [wNum, path] of pat.assignments.entries()) {
-            const word = solverWords.find(sw => sw.logiNumber === wNum)!;
-            
-            let isStarApplied = false;
-            if (starAss.has(wNum)) {
-              const matchedWord = starAss.get(wNum)!;
-              word.text = matchedWord;
-              word.length = matchedWord.length;
-              word.fixedNodeIDs = new Array(matchedWord.length + 1).fill(null);
-              
-              if (starContext) {
-                starContext.unusedList2Words = starContext.unusedList2Words.filter(w => w !== matchedWord);
-                starContext.unassignedStarLogiNums.delete(wNum);
+          let appliedAny = false;
+          for (const { pat, starAss } of groupsToApply) {
+            for (const [wNum, path] of pat.assignments.entries()) {
+              const word = solverWords.find(sw => sw.logiNumber === wNum)!;
+
+              let isStarApplied = false;
+              if (starAss.has(wNum)) {
+                const matchedWord = starAss.get(wNum)!;
+                word.text = matchedWord;
+                word.length = matchedWord.length;
+                word.fixedNodeIDs = new Array(matchedWord.length + 1).fill(null);
+
+                if (starContext) {
+                  starContext.unusedList2Words = starContext.unusedList2Words.filter(w => w !== matchedWord);
+                  starContext.unassignedStarLogiNums.delete(wNum);
+                }
+                log(`[GroupSolve] ★単語 [${wNum}] の割り当てを「${matchedWord}」に確定しました。`);
+                isStarApplied = true;
               }
-              log(`[GroupSolve] ★単語 [${wNum}] の割り当てを「${matchedWord}」に確定しました。`);
-              isStarApplied = true;
-            }
 
-            const fixedLen = isStarApplied ? 0 : getFixedLength(word);
-            for (let i = 0; i < path.length; i++) {
-              const step = path[i];
-              const node = nodeMap.get(step.nid)!;
-              const correctChar = word.text[fixedLen + i];
-              fixNode(node, correctChar);
-              word.fixedNodeIDs[fixedLen + i + 1] = step.nid;
-              if (fixedLen === 0 && i === 0) {
-                node.logiNumber = wNum;
+              const fixedLen = isStarApplied ? 0 : getFixedLength(word);
+              for (let i = 0; i < path.length; i++) {
+                const step = path[i];
+                const node = nodeMap.get(step.nid)!;
+                const correctChar = word.text[fixedLen + i];
+                fixNode(node, correctChar);
+                word.fixedNodeIDs[fixedLen + i + 1] = step.nid;
+                if (fixedLen === 0 && i === 0) {
+                  node.logiNumber = wNum;
+                }
               }
+              word.isUsed = true;
+              appliedAny = true;
+              log(`[GroupSolve] グループの唯一のパターンを確定適用しました: 単語 [${wNum}] ("${word.text}")`);
             }
-            word.isUsed = true;
-            appliedAny = true;
-            log(`[GroupSolve] グループの唯一のパターンを確定適用しました: 単語 [${wNum}] ("${word.text}")`);
+          }
+
+          if (appliedAny) {
+            await reportStep();
+            log(`[GroupSolve] パターン数1のグループ確定を適用したため、再度グループ洗い出しをやり直します。`);
+            continue; // while(true) の先頭へ戻ってやり直す
           }
         }
-
-        if (appliedAny) {
-          await reportStep();
-          log(`[GroupSolve] パターン数1のグループ確定を適用したため、再度グループ洗い出しをやり直します。`);
-          continue; // while(true) の先頭へ戻ってやり直す
-        }
       }
-    }
 
-    break; // while(true) ループを抜けて制約伝播へ
-  }
+      break; // while(true) ループを抜けて制約伝播へ
+    }
 
     // --- 制約伝播 (Constraint Propagation) ---
     let propagationChanged = true;
@@ -2966,7 +3244,7 @@ export async function solveZigzagAsync(
 
         const basePat = pats[0];
         const candInvariants = new Map<string, string>();
-        
+
         for (const path of basePat.assignments.values()) {
           for (const step of path) {
             candInvariants.set(step.nid, step.char);
@@ -2977,7 +3255,7 @@ export async function solveZigzagAsync(
           if (candInvariants.size === 0) break;
           const p = pats[i];
           const usedNids = new Set<string>();
-          
+
           for (const path of p.assignments.values()) {
             for (const step of path) {
               if (candInvariants.has(step.nid)) {
@@ -2988,7 +3266,7 @@ export async function solveZigzagAsync(
               }
             }
           }
-          
+
           for (const nid of Array.from(candInvariants.keys())) {
             if (!usedNids.has(nid)) {
               candInvariants.delete(nid);
@@ -3029,7 +3307,7 @@ export async function solveZigzagAsync(
                 if (invariantFixedNodes.has(step.nid)) {
                   const inv = invariantFixedNodes.get(step.nid)!;
                   if (inv.char !== step.char) {
-                    isValid = false; 
+                    isValid = false;
                     break;
                   }
                 }
@@ -3077,18 +3355,18 @@ export async function solveZigzagAsync(
         const snap = createSnapshot();
         const ok = applyCombination(currentComb, starContext);
         if (!ok) {
-          restoreSnapshot(snap);
+          restoreSnapshot(snap, `パターンの適用に失敗したため復元`);
           return false;
         }
 
         if (puzzle.isWList) {
           const wlistRes = validateWListAssignment();
           if (!wlistRes.success) {
-            restoreSnapshot(snap);
+            restoreSnapshot(snap, `Wリストの制約検証に失敗したため復元`);
             return false;
           }
         }
-        
+
         if (findAlternative && firstSolutionCells) {
           const { isDifferent, diffDetails } = checkIsDifferent();
 
@@ -3097,7 +3375,7 @@ export async function solveZigzagAsync(
             foundAlt = true;
             return true;
           }
-          restoreSnapshot(snap);
+          restoreSnapshot(snap, `同一解だったため別解探索を継続`);
           return false;
         } else {
           foundSolution = true;
@@ -3144,11 +3422,11 @@ export async function solveZigzagAsync(
     }
   ): boolean => {
     // グループ間でのマスの重複衝突を事前チェック
-    const globalUsedCells = new Map<string, {char: string, gIdx: number}>();
-    
+    const globalUsedCells = new Map<string, { char: string, gIdx: number }>();
+
     // グループ間でのリスト2単語の重複使用チェック
     const usedStarWords = new Set<string>();
-    
+
     for (let gIdx = 0; gIdx < comb.length; gIdx++) {
       const pat = comb[gIdx];
       for (const [wNum, path] of pat.assignments.entries()) {
@@ -3167,7 +3445,7 @@ export async function solveZigzagAsync(
           } else {
             globalUsedCells.set(step.nid, { char: step.char, gIdx });
           }
-          
+
           const node = nodeMap.get(step.nid)!;
           if (node.isFixed && node.currentChar !== step.char) {
             return false; // すでに固定されている文字との不一致
@@ -3180,21 +3458,21 @@ export async function solveZigzagAsync(
     for (const pat of comb) {
       for (const [wNum, path] of pat.assignments.entries()) {
         const word = solverWords.find(sw => sw.logiNumber === wNum)!;
-        
+
         const isStar = starContext && starContext.unassignedStarLogiNums.has(wNum);
         if (isStar) {
           const wordText = path.map(step => step.char).join("");
           word.text = wordText;
           word.length = wordText.length;
           word.fixedNodeIDs = new Array(wordText.length + 1).fill(null);
-          
+
           for (let i = 0; i < path.length; i++) {
             const step = path[i];
             const node = nodeMap.get(step.nid)!;
             fixNode(node, step.char);
             word.fixedNodeIDs[i + 1] = step.nid;
           }
-          
+
           const startNode = nodeMap.get(path[0].nid)!;
           startNode.logiNumber = wNum;
         } else {
@@ -3228,7 +3506,7 @@ export async function solveZigzagAsync(
     await collectWordCandidates();
 
     const allowedStarts = getAllowedStartNodes();
-    const wordPaths = new Map<number, {nid: string, char: string}[][]>();
+    const wordPaths = new Map<number, { nid: string, char: string }[][]>();
     const wordScores = new Map<number, number>();
 
     for (const w of remainingWords) {
@@ -3239,7 +3517,7 @@ export async function solveZigzagAsync(
       await new Promise(r => setTimeout(r, 0));
 
       const fixedLen = getFixedLength(w);
-      let paths: {nid: string, char: string}[][] = [];
+      let paths: { nid: string, char: string }[][] = [];
 
       if (fixedLen === 0) {
         const overrideNodes = allowedStarts.get(w.logiNumber) || [];
@@ -3251,7 +3529,7 @@ export async function solveZigzagAsync(
       } else {
         paths = getAllValidPathsForBacktrack(w);
       }
-      
+
       if (paths.length === 0) {
         log(`[Backtrack] 単語 [${w.logiNumber}] の配置可能なパスが見つかりません。矛盾です。`);
         return false;
@@ -3265,7 +3543,7 @@ export async function solveZigzagAsync(
     });
 
     log(`[Backtrack] 仮置き総当たり（バックトラッキング）を開始します... (対象単語数: ${sortedWords.length})`);
-    
+
     log(`[Backtrack] --- バックトラック探索順データ一覧（スコア順） ---`);
     sortedWords.forEach((w, idx) => {
       const paths = wordPaths.get(w.logiNumber) || [];
@@ -3273,18 +3551,17 @@ export async function solveZigzagAsync(
       log(`[Backtrack] ${idx + 1}. 単語 [${w.logiNumber}] "${w.text}" (${w.length}文字) - 候補パス数: ${paths.length}, スコア: ${score}`);
     });
     log(`[Backtrack] ---------------------------------------------`);
-    
+
     let iterations = 0;
     const maxIterations = 5000000;
-    let shownLimitWarning = false;
 
     if (onBacktrackEnd) onBacktrackEnd();
 
     let isConfirmed = false;
     if (onConfirm) {
-      isConfirmed = await onConfirm("総当たりをやります。時間がかかりますが、イイですか？");
+      isConfirmed = await onConfirm("マスの総当たりを行います。これには時間がかかりますが、いいですか？");
     } else {
-      isConfirmed = window.confirm("総当たりをやります。時間がかかりますが、イイですか？");
+      isConfirmed = window.confirm("マスの総当たりを行います。これには時間がかかりますが、いいですか？");
     }
 
     if (!isConfirmed) {
@@ -3296,7 +3573,7 @@ export async function solveZigzagAsync(
 
     const backtrack = async (wordIdx: number): Promise<boolean> => {
       iterations++;
-      
+
       if (iterations > maxIterations) {
         log(`[Backtrack] [警告] 試行回数が上限（${maxIterations}回）に達したため、バックトラッキングを終了します。`);
         return false;
@@ -3333,12 +3610,61 @@ export async function solveZigzagAsync(
 
       const w = sortedWords[wordIdx];
       const paths = wordPaths.get(w.logiNumber)!;
+      const fixedLen = getFixedLength(w);
+
+      const currentAllowedStarts = getAllowedStartNodes();
+      const allowedNodes = currentAllowedStarts.get(w.logiNumber) || [];
+      const allowedNodeIds = new Set(allowedNodes.map(n => n.id));
 
       for (let pIdx = 0; pIdx < paths.length; pIdx++) {
         await checkYield();
         const path = paths[pIdx];
+
+        // 1. 最新の開始候補に入っていない場合はスキップ (読書順 of 動的チェック)
+        if (fixedLen === 0) {
+          if (!allowedNodeIds.has(path[0].nid)) {
+            continue;
+          }
+        }
+
+        // 2. 安全策：同じ単語番号がすでに盤面の他のノードに設定されていないかチェック
+        let isAlreadyPlaced = false;
+        for (const otherNode of nodeMap.values()) {
+          if (otherNode.logiNumber === w.logiNumber) {
+            if (w.fixedNodeIDs[1] !== otherNode.id) {
+              isAlreadyPlaced = true;
+              break;
+            }
+          }
+        }
+        if (isAlreadyPlaced) {
+          continue;
+        }
         let canPlace = true;
-        const fixedLen = getFixedLength(w);
+
+        // 3. 読書順矛盾チェック (仮置き済み単語との順序チェック)
+        const currentStartIdx = nodeIdxMap.get(path[0].nid);
+        if (currentStartIdx !== undefined) {
+          for (const otherW of solverWords) {
+            if (otherW.isUsed && otherW.logiNumber !== w.logiNumber) {
+              const otherStartId = otherW.fixedNodeIDs[1];
+              if (otherStartId) {
+                const otherStartIdx = nodeIdxMap.get(otherStartId);
+                if (otherStartIdx !== undefined) {
+                  if (otherW.logiNumber < w.logiNumber && otherStartIdx > currentStartIdx) {
+                    canPlace = false;
+                    break;
+                  }
+                  if (otherW.logiNumber > w.logiNumber && otherStartIdx < currentStartIdx) {
+                    canPlace = false;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+        if (!canPlace) continue;
         const usedThisTime = new Set<string>();
 
         for (let i = 0; i < path.length; i++) {
@@ -3348,6 +3674,26 @@ export async function solveZigzagAsync(
             canPlace = false;
             break;
           }
+
+          // 確定済みの他の単語が占有している通常マスとの衝突チェック
+          let isOccupiedByOther = false;
+          for (const otherW of solverWords) {
+            if (otherW.isUsed && otherW.logiNumber !== w.logiNumber) {
+              if (otherW.fixedNodeIDs.includes(node.id)) {
+                const isSharedCell = (isIrregularMode && sharedCells[node.id]) ||
+                  (puzzle.isWListStar && node.logiNumber !== null && puzzle.wordStarList?.[node.logiNumber]);
+                if (!isSharedCell) {
+                  isOccupiedByOther = true;
+                  break;
+                }
+              }
+            }
+          }
+          if (isOccupiedByOther) {
+            canPlace = false;
+            break;
+          }
+
           if (usedThisTime.has(step.nid)) {
             canPlace = false;
             break;
@@ -3356,16 +3702,11 @@ export async function solveZigzagAsync(
         }
         if (!canPlace) continue;
 
-        if (iterations <= 500) {
-          const pathCoords = path.map(step => {
-            const node = nodeMap.get(step.nid)!;
-            return `${step.char}(${getExcelCoords(node)})`;
-          }).join("->");
-          log(`[Backtrack] [試行 ${iterations}/深度 ${wordIdx}] 単語 [${w.logiNumber}] "${w.text}" をパス #${pIdx + 1} に仮置き: ${pathCoords}`);
-        } else if (!shownLimitWarning) {
-          shownLimitWarning = true;
-          log(`[Backtrack] ※ 試行回数が 500 回を超えたため、フリーズ防止のためにこれ以降の詳細な仮置き・バックトラックログは省略します。`);
-        }
+        const pathCoords = path.map(step => {
+          const node = nodeMap.get(step.nid)!;
+          return `${step.char}(${getExcelCoords(node)})`;
+        }).join("->");
+        log(`[Backtrack] [試行 ${iterations}/深度 ${wordIdx}] 単語 [${w.logiNumber}] "${w.text}" をパス #${pIdx + 1} に仮置き: ${pathCoords}`);
 
         const snap = createSnapshot();
 
@@ -3374,27 +3715,36 @@ export async function solveZigzagAsync(
           const node = nodeMap.get(step.nid)!;
           fixNode(node, step.char);
           w.fixedNodeIDs[fixedLen + i + 1] = step.nid;
-          
+
           if (fixedLen === 0 && i === 0) {
             node.logiNumber = w.logiNumber;
+            log(`[Backtrack] [仮置き数字設定] マス ${getExcelCoords(node)} に単語番号 ${w.logiNumber} を仮設定`);
           }
         }
         w.isUsed = true;
 
         if (await backtrack(wordIdx + 1)) return true;
 
-        if (iterations <= 500) {
-          log(`[Backtrack] [試行 ${iterations}/深度 ${wordIdx}] 単語 [${w.logiNumber}] "${w.text}" の仮置きを解除（戻る）`);
-        }
+        log(`[Backtrack] [試行 ${iterations}/深度 ${wordIdx}] 単語 [${w.logiNumber}] "${w.text}" の仮置きを解除（戻る）`);
 
-        restoreSnapshot(snap);
+        restoreSnapshot(snap, `単語 [${w.logiNumber}] "${w.text}" の仮置きが失敗したため復元`);
       }
 
       return false;
     };
 
     const initialSnap = createSnapshot();
-    const success = await backtrack(0);
+    let success = false;
+    try {
+      success = await backtrack(0);
+    } catch (e: any) {
+      if (e.message === "cancelled") {
+        log(`[Backtrack] 中止されたため、現在の探索状態を保持し、ロールバックしません。`);
+      } else {
+        restoreSnapshot(initialSnap, `エラー発生のため初期状態に復元 : ${e.message}`);
+      }
+      throw e;
+    }
 
     if (success) {
       if (findAlternative) {
@@ -3409,7 +3759,7 @@ export async function solveZigzagAsync(
       } else {
         log(`[Backtrack] 解答が見つかりませんでした。(試行回数: ${iterations}) 元の状態に戻します。`);
       }
-      restoreSnapshot(initialSnap);
+      restoreSnapshot(initialSnap, `解答が見つからなかったため初期状態に復元`);
       return false;
     }
   };
@@ -3502,6 +3852,7 @@ export async function solveZigzagAsync(
   // Wリスト★用の総当り割り当て探索ジェネレータ
 
 
+  let usedFullBacktrack = false;
   const runBacktrackWithPermutations = async (): Promise<boolean> => {
     const unassignedStars = solverWords.filter(w => puzzle.wordStarList?.[w.logiNumber] && w.text === "");
     const list2Words = (puzzle.wordList2 || []).filter(w => w.trim() !== '');
@@ -3523,7 +3874,7 @@ export async function solveZigzagAsync(
         if (puzzle.wordStarList?.[w.logiNumber] && w.text === "") continue;
 
         const fixedLen = getFixedLength(w);
-        let paths: {nid: string, char: string}[][] = [];
+        let paths: { nid: string, char: string }[][] = [];
         if (fixedLen === 0) {
           const overrideNodes = allowedStarts.get(w.logiNumber) || [];
           paths = getAllValidPathsForBacktrack(w, overrideNodes);
@@ -3550,6 +3901,7 @@ export async function solveZigzagAsync(
       }
       log(`[Solver] 共有グループ探索（KGL）が中断されました（理由: ${reason}）。`);
       log(`[Solver] フォールバックとして従来のフル総当たりを実行します。`);
+      usedFullBacktrack = true;
       return await solveByBacktracking();
     }
   };
@@ -3559,7 +3911,7 @@ export async function solveZigzagAsync(
   if (remainingCount > 0 || findAlternative) {
     isBacktracked = true;
     if (onBacktrackStart) onBacktrackStart();
-    
+
     let backtrackSuccess = false;
     try {
       backtrackSuccess = await runBacktrackWithPermutations();
@@ -3571,9 +3923,9 @@ export async function solveZigzagAsync(
       }
       backtrackSuccess = false;
     }
-    
+
     if (onBacktrackEnd) onBacktrackEnd();
-    
+
     if (findAlternative) {
       if (backtrackSuccess) {
         isAlternativeFound = true;
@@ -3581,7 +3933,7 @@ export async function solveZigzagAsync(
         isUnique = true;
       }
     }
-    
+
     // バックトラッキングの結果に関わらず reportStep を1回だけ呼んで最新状態を反映
     await reportStep();
   }
@@ -3589,7 +3941,7 @@ export async function solveZigzagAsync(
   // 元のパズルのセル（cells）をベースにして、元の数字（number）等の情報を破壊せずに復元する
   const finalCells = currentCells.map((row, y) => row.map((_, x) => ({ ...cells[y][x] })));
   const currGridChars = getGridChars();
-  
+
   // Wリスト用の検証と確定文字マッピング取得
   const wlistRes = puzzle.isWList ? validateWListAssignment() : null;
   const wlistAssignments = wlistRes?.success ? wlistRes.assignments : null;
@@ -3622,6 +3974,10 @@ export async function solveZigzagAsync(
 
     if (node.logiNumber !== null) {
       cell.number = node.logiNumber;
+    } else {
+      if (isChoMode || isIrregularMode) {
+        cell.number = null;
+      }
     }
 
     // 共通のcurrGridCharsを用いて別解差異チェック
@@ -3668,11 +4024,17 @@ export async function solveZigzagAsync(
   // 盤面が全て埋まっていれば、内部的なパスの繋がりが不完全でも「解答完了」とみなす
   const isComplete = allCellsFilled || isUnique;
 
+  let solveMethod: 'logical' | 'group' | 'full' = 'logical';
+  if (isBacktracked) {
+    solveMethod = usedFullBacktrack ? 'full' : 'group';
+  }
+
   return {
     success: isComplete,
     solvedCells: finalCells,
     message: isComplete ? '解答が完了しました！' : '論理的には解けません。総当たりしか手段がありません。',
     isBacktracked,
+    solveMethod,
     isAlternativeFound,
     isUnique,
     remainingWord: finalWlistRes.remainingWord

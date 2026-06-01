@@ -156,11 +156,11 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
     return order;
   }, []);
 
-  const setWordListOrderMode = useCallback((mode: 'numerical' | 'alphabetical') => {
+  const setWordListOrderMode = useCallback((mode: 'numerical' | 'alphabetical', forceResort = false) => {
     push(prev => {
       let customAlphabeticalOrder = prev.customAlphabeticalOrder;
-      if (mode === 'alphabetical' && !customAlphabeticalOrder) {
-        // 初期化
+      if (mode === 'alphabetical' && (forceResort || !customAlphabeticalOrder)) {
+        // 初期化 / 強制再ソート
         const boardNumbers = new Set<number>();
         prev.cells.forEach(row => row.forEach(cell => {
           if (cell.number) boardNumbers.add(cell.number);
@@ -168,7 +168,7 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
         const numbers = Array.from(boardNumbers);
         
         if (prev.puzzleType === '部分ナンバーレス') {
-          // 部分ナンバーレス: 公開(数字順) + 非公開(あいうえお順)
+          // 部分ナンバーレス: 公開(数字順) + 非公開(50音順)
           const publicNums = numbers.filter(n => prev.publicNumbers?.[n]).sort((a, b) => a - b);
           const privateNums = numbers.filter(n => !prev.publicNumbers?.[n]).sort((a, b) => {
             const wordA = prev.wordList[a] || '';
@@ -177,7 +177,7 @@ export const usePuzzle = (initialHeight = 17, initialWidth = 17) => {
           });
           customAlphabeticalOrder = [...publicNums, ...privateNums];
         } else {
-          // 通常: 漢字コード順(あいうえお順)
+          // 通常: 漢字コード順(50音順)
           customAlphabeticalOrder = numbers.sort((a, b) => {
             const wordA = prev.wordList[a] || '';
             const wordB = prev.wordList[b] || '';
