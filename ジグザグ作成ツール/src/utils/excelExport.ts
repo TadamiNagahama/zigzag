@@ -1,6 +1,8 @@
 import ExcelJS from 'exceljs';
 import type { PuzzleData } from '../models/types';
 import type { ExportOptions } from '../components/ExportDialog';
+import { normalizeWord } from './puzzleUtils';
+
 
 // 単位変換関数 (px -> Excel単位)
 const pxToPoints = (px: number) => px * 0.75;
@@ -39,8 +41,9 @@ const calculateSharedCells = (puzzle: PuzzleData): Record<string, number[]> => {
   };
 
   for (const num of Array.from(usedNumbers)) {
-    const word = puzzle.wordList[num];
-    if (!word) continue;
+    const rawWord = puzzle.wordList[num];
+    if (!rawWord) continue;
+    const word = normalizeWord(rawWord);
     let startPos: { x: number, y: number } | null = null;
     for (let y = 0; y < puzzle.height; y++) {
       for (let x = 0; x < puzzle.width; x++) {

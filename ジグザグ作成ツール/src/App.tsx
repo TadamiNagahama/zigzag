@@ -25,6 +25,7 @@ import { auth, dbFirestore, googleProvider } from './models/firebase'
 import { signInWithPopup, signOut, onAuthStateChanged, type User } from 'firebase/auth'
 import { collection, addDoc, getDocs, query, where, deleteDoc, doc, updateDoc, onSnapshot } from 'firebase/firestore'
 import { type PuzzleData, type PrintOptions, type Cell, APP_VERSION } from './models/types'
+import { normalizeWord, normalizeChar } from './utils/puzzleUtils'
 import { Settings, ZoomIn, ZoomOut, Maximize, Plus, Printer, Grid3X3 } from 'lucide-react'
 import './App.css'
 type AppMode = 'shade' | 'edit' | 'answer';
@@ -271,8 +272,9 @@ function App() {
     };
 
     for (const num of Array.from(usedNumbers).sort((a, b) => a - b)) {
-      const word = p.wordList[num];
-      if (!word || word.trim() === '') continue;
+      const rawWord = p.wordList[num];
+      if (!rawWord || rawWord.trim() === '') continue;
+      const word = normalizeWord(rawWord);
 
       let startPos: { x: number, y: number } | null = null;
       for (let y = 0; y < p.height; y++) {
@@ -1255,7 +1257,7 @@ function App() {
               if (i > 0 && targetCell.number !== null && !targetCell.mergedParent) {
                 continue;
               }
-              targetCell.answerChar = word[currentCharIndex];
+              targetCell.answerChar = normalizeChar(word[currentCharIndex]);
             } else {
               break;
             }
@@ -1757,6 +1759,7 @@ function App() {
             }
 
             const word = puzzle.wordList[num];
+            const normalizedWord = normalizeWord(word);
             let startPos: { x: number, y: number } | null = null;
             for (let y = 0; y < puzzle.height; y++) {
               for (let x = 0; x < puzzle.width; x++) {
@@ -1773,7 +1776,7 @@ function App() {
               continue;
             }
 
-            const pathCount = countPaths(word, startPos.x, startPos.y, new Set());
+            const pathCount = countPaths(normalizedWord, startPos.x, startPos.y, new Set());
             if (pathCount === 0) {
               errors.push(`番号 ${num} (「${word}」) の経路が正しく繋がっていません`);
             } else if (pathCount >= 2) {
@@ -1794,7 +1797,7 @@ function App() {
                 if (x2 >= 0 && x2 < puzzle.width && y2 >= 0 && y2 < puzzle.height) {
                   const cell2 = puzzle.cells[y2][x2];
                   const char2 = cell2.char || cell2.answerChar;
-                  if (char2 === word[1]) {
+                  if (char2 === normalizedWord[1]) {
                     isDirCorrect = true;
                   }
                 }
@@ -1877,7 +1880,7 @@ function App() {
                 // 全ての網掛けマスを起点に探索
                 for (const posStr of shadedCells) {
                   const [sx, sy] = posStr.split(',').map(Number);
-                  if (hasShadedPath(word, sx, sy, new Set())) {
+                  if (hasShadedPath(normalizeWord(word), sx, sy, new Set())) {
                     found = true;
                     break;
                   }
@@ -1894,7 +1897,7 @@ function App() {
                 let foundInShaded = false;
                 for (const posStr of shadedCells) {
                   const [sx, sy] = posStr.split(',').map(Number);
-                  if (hasShadedPath(puzzle.remainingAnswerWord, sx, sy, new Set())) {
+                  if (hasShadedPath(normalizeWord(puzzle.remainingAnswerWord), sx, sy, new Set())) {
                     foundInShaded = true;
                     break;
                   }
@@ -1917,10 +1920,10 @@ function App() {
                   if (cell.number === num) { sx = x; sy = y; }
                 }));
 
-                starFindings[num] = targetWords.filter(word => countPaths(word, sx, sy, new Set()) > 0);
+                starFindings[num] = targetWords.filter(word => countPaths(normalizeWord(word), sx, sy, new Set()) > 0);
               });
 
-              // 単純なマッチングチェック（1対1対応が必要）
+              // 単紙なマッチングチェック（1対1対応が必要）
               const assignedWords = new Set<string>();
               const unassignedStars: number[] = [];
 
@@ -1950,7 +1953,7 @@ function App() {
                   puzzle.cells.forEach((row, y) => row.forEach((cell, x) => {
                     if (cell.number === num) { sx = x; sy = y; }
                   }));
-                  if (countPaths(puzzle.remainingAnswerWord, sx, sy, new Set()) > 0) {
+                  if (countPaths(normalizeWord(puzzle.remainingAnswerWord), sx, sy, new Set()) > 0) {
                     foundAtStar = true;
                     break;
                   }

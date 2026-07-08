@@ -1,4 +1,6 @@
 import { type Cell, type PuzzleData } from '../models/types';
+import { normalizeWord } from './puzzleUtils';
+
 
 /**
  * ジグザグパズルの自動解答ロジック
@@ -449,7 +451,7 @@ export async function solveZigzagAsync(
   }));
 
   for (const num of Array.from(allNumbersOnBoard).sort((a, b) => a - b)) {
-    const text = wordList[num] || "";
+    const text = normalizeWord(wordList[num] || "");
     const isStar = puzzle.isWListStar && puzzle.wordStarList?.[num];
     const word: SolverWord = {
       text,
@@ -717,7 +719,7 @@ export async function solveZigzagAsync(
       if (cell.isShaded) {
         const block = shadedBlocks.find(b => b.nodeIds.has(node.id));
         if (block) {
-          const list2Words = (puzzle.wordList2 || []).filter(w => w.trim() !== '');
+          const list2Words = (puzzle.wordList2 || []).filter(w => w.trim() !== '').map(normalizeWord);
 
           const charInAnyWord = list2Words.some(w => w.includes(char));
           if (!charInAnyWord) {
@@ -757,7 +759,7 @@ export async function solveZigzagAsync(
     }
 
     if (puzzle.isWListStar && node.logiNumber !== null && puzzle.wordStarList?.[node.logiNumber]) {
-      const list2Words = (puzzle.wordList2 || []).filter(w => w.trim() !== '');
+      const list2Words = (puzzle.wordList2 || []).filter(w => w.trim() !== '').map(normalizeWord);
       const assignedWords = new Set(solverWords.map(sw => sw.text).filter(t => t !== ""));
       const unusedList2Words = list2Words.filter(w => !assignedWords.has(w));
 
@@ -807,6 +809,7 @@ export async function solveZigzagAsync(
     if (!puzzle.isWList) return { success: true };
 
     const list2Words = (puzzle.wordList2 || []).filter(w => w.trim() !== '');
+    const normalizedList2Words = list2Words.map(normalizeWord);
     const gridChars: Record<string, string> = {};
     for (const node of nodeMap.values()) {
       if (node.isFixed && node.currentChar) {
@@ -868,14 +871,14 @@ export async function solveZigzagAsync(
       return { success: false };
     };
 
-    const resNoRemaining = checkAssignmentForWords(list2Words);
+    const resNoRemaining = checkAssignmentForWords(normalizedList2Words);
     if (resNoRemaining.success) {
       return { success: true, assignments: resNoRemaining.assignments };
     }
 
     for (let i = 0; i < list2Words.length; i++) {
       const remaining = list2Words[i];
-      const activeWords = list2Words.filter((_, idx) => idx !== i);
+      const activeWords = normalizedList2Words.filter((_, idx) => idx !== i);
       const resWithRemaining = checkAssignmentForWords(activeWords);
       if (resWithRemaining.success) {
         return { success: true, remainingWord: remaining, assignments: resWithRemaining.assignments };
@@ -966,7 +969,7 @@ export async function solveZigzagAsync(
     wordCharCandidates = new Map();
     nodeCharUsage = new Map();
 
-    const list2Words = (puzzle.wordList2 || []).filter(w => w.trim() !== '');
+    const list2Words = (puzzle.wordList2 || []).filter(w => w.trim() !== '').map(normalizeWord);
     const assignedWords = new Set(solverWords.map(sw => sw.text).filter(t => t !== ""));
     const unusedList2Words = list2Words.filter(w => !assignedWords.has(w));
 
@@ -1640,7 +1643,7 @@ export async function solveZigzagAsync(
     const unassignedStars = solverWords.filter(w => puzzle.wordStarList?.[w.logiNumber] && w.text === "");
     if (unassignedStars.length === 0) return false;
 
-    const list2Words = (puzzle.wordList2 || []).filter(w => w.trim() !== '');
+    const list2Words = (puzzle.wordList2 || []).filter(w => w.trim() !== '').map(normalizeWord);
     const assignedWords = new Set(solverWords.map(sw => sw.text).filter(t => t !== ""));
     const unusedList2Words = list2Words.filter(w => !assignedWords.has(w));
     if (unusedList2Words.length === 0) return false;
@@ -3855,7 +3858,7 @@ export async function solveZigzagAsync(
   let usedFullBacktrack = false;
   const runBacktrackWithPermutations = async (): Promise<boolean> => {
     const unassignedStars = solverWords.filter(w => puzzle.wordStarList?.[w.logiNumber] && w.text === "");
-    const list2Words = (puzzle.wordList2 || []).filter(w => w.trim() !== '');
+    const list2Words = (puzzle.wordList2 || []).filter(w => w.trim() !== '').map(normalizeWord);
     const assignedWords = new Set(solverWords.map(sw => sw.text).filter(t => t !== ""));
     const unusedList2Words = list2Words.filter(w => !assignedWords.has(w));
 

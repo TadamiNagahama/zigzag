@@ -44,3 +44,26 @@ export const getAnswerChars = (puzzle: PuzzleData): Record<string, string> => {
   }));
   return charMap;
 };
+
+/**
+ * 小書き文字（捨て仮名）を大書き文字（通常の文字）に変換して正規化する
+ */
+export function normalizeChar(c: string): string {
+  if (!c) return '';
+  const map: Record<string, string> = {
+    'っ': 'つ', 'ぁ': 'あ', 'ぃ': 'い', 'ぅ': 'う', 'ぇ': 'え', 'ぉ': 'お',
+    'ゃ': 'や', 'ゅ': 'ゆ', 'ょ': 'よ',
+    'ッ': 'ツ', 'ァ': 'ア', 'ィ': 'イ', 'ゥ': 'ウ', 'ェ': 'エ', 'ォ': 'オ',
+    'ャ': 'ヤ', 'ュ': 'ユ', 'ョ': 'ヨ'
+  };
+  return map[c] || c;
+}
+
+/**
+ * 単語全体の小書き文字を大書き文字に正規化する
+ */
+export function normalizeWord(word: string): string {
+  if (!word) return '';
+  return word.split('').map(normalizeChar).join('');
+}
+
