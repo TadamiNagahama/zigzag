@@ -167,7 +167,7 @@ const renderPuzzleSection = (
           cell.value = {
             richText: [
               { font: { name: defaultFontName, size: options.fontSizeSmall }, text: alphabet + '\n' },
-              { font: { name: defaultFontName, size: 14 }, text: ' ' + ans }
+              { font: { name: defaultFontName, size: 14 }, text: ans }
             ]
           };
         }
@@ -184,7 +184,7 @@ const renderPuzzleSection = (
         const bottomCell = worksheet.getCell(boxesRow + 1, col);
         topCell.value = alphabet;
         const ans = isQuestion ? '' : (keyToChar[alphabet] || '');
-        bottomCell.value = ans ? (' ' + ans) : '';
+        bottomCell.value = ans || '';
         topCell.font = { name: defaultFontName, size: options.fontSizeSmall };
         bottomCell.font = { name: defaultFontName, size: 14 };
         topCell.border = { top: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
