@@ -21,10 +21,10 @@ service cloud.firestore {
     }
 
     // --- 掲示板用のルール ---
-    // users: プロフィールの作成と読み取り（ログイン必須）
+    // users: プロフィールの作成と読み取り（ログイン必須。管理者は他人のデータも変更可能）
     match /users/{userId} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.uid == userId;
+      allow write: if request.auth != null && (request.auth.uid == userId || isAdmin());
     }
     // threads / comments: 承認済みユーザーのみ
     match /threads/{threadId} {
